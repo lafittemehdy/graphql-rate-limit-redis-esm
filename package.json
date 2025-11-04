@@ -1,0 +1,72 @@
+{
+    "author": "Lafitte Mehdy",
+    "bugs": {
+        "url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/issues"
+    },
+    "description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
+    "devDependencies": {
+        "@biomejs/biome": "2.2.6",
+        "@graphql-tools/schema": "^10.0.0",
+        "@types/node": "^20.19.24",
+        "@vitest/coverage-v8": "^4.0.6",
+        "@vitest/ui": "^4.0.6",
+        "graphql": "^16.0.0",
+        "rate-limiter-flexible": "^8.0.0",
+        "typescript": "^5.0.0",
+        "vitest": "^4.0.6"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
+    },
+    "files": [
+        "LICENSE",
+        "README.md",
+        "dist"
+    ],
+    "homepage": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm#readme",
+    "keywords": [
+        "directive",
+        "dos-protection",
+        "esm",
+        "graphql",
+        "rate-limit",
+        "redis",
+        "security"
+    ],
+    "license": "MIT",
+    "main": "./dist/index.js",
+    "name": "graphql-rate-limit-redis-esm",
+    "peerDependencies": {
+        "@graphql-tools/utils": "^10.0.0",
+        "graphql": "^16.0.0",
+        "rate-limiter-flexible": "^8.0.0"
+    },
+    "publishConfig": {
+        "access": "public",
+        "provenance": true
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm.git"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "lint": "biome check --unsafe --write && tsc --noEmit",
+        "prepublishOnly": "pnpm run lint && pnpm run build && pnpm test",
+        "test": "vitest run",
+        "test:coverage": "vitest run --coverage",
+        "test:ui": "vitest --ui",
+        "test:watch": "vitest"
+    },
+    "sideEffects": false,
+    "type": "module",
+    "types": "./dist/index.d.ts",
+    "version": "0.1.0"
+}
