@@ -32,7 +32,7 @@ importers:
         version: 16.12.0
       rate-limiter-flexible:
         specifier: ^8.0.0
-        version: 8.1.0
+        version: 8.2.0
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
@@ -609,8 +609,8 @@ packages:
     resolution: {integrity: sha512-3Ybi1tAuwAP9s0r1UQ2J4n5Y0G05bJkpUIO0/bI9MhwmD70S5aTWbXGBwxHrelT+XM1k6dM0pk+SwNkpTRN7Pg==}
     engines: {node: ^10 || ^12 || >=14}
 
-  rate-limiter-flexible@8.1.0:
-    resolution: {integrity: sha512-J+4xBdVboibP1h0Imn4nFoCLT+UM9Os9vJaWaRWkLsQxS7jrhLJeLlmzP5hyCEsLwtgFIIY5KcWiJGyyVTMaKg==}
+  rate-limiter-flexible@8.2.0:
+    resolution: {integrity: sha512-lzpvMBP6GpCJftWP90RHzhCAAPFnO3BKaE6STNc6tPsu/uF6Y7kZDczV45a4Ms/H+5G2qqPFp8kg0l8gxCxcsw==}
 
   rollup@4.52.5:
     resolution: {integrity: sha512-3GuObel8h7Kqdjt0gxkEzaifHTqLVW56Y/bjN7PSQtkKr0w3V/QYSdt6QWYtd7A1xUtYQigtdUfgj1RvWVtorw==}
@@ -1199,7 +1199,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  rate-limiter-flexible@8.1.0: {}
+  rate-limiter-flexible@8.2.0: {}
 
   rollup@4.52.5:
     dependencies:
