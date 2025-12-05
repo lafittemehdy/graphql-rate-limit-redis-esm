@@ -11,7 +11,7 @@
         "@vitest/coverage-v8": "^4.0.6",
         "@vitest/ui": "^4.0.6",
         "graphql": "^16.0.0",
-        "rate-limiter-flexible": "^8.0.0",
+        "rate-limiter-flexible": "^9.0.0",
         "typescript": "^5.0.0",
         "vitest": "^4.0.6"
     },
@@ -45,7 +45,7 @@
     "peerDependencies": {
         "@graphql-tools/utils": "^10.0.0",
         "graphql": "^16.0.0",
-        "rate-limiter-flexible": "^8.0.0"
+        "rate-limiter-flexible": "^9.0.0"
     },
     "publishConfig": {
         "access": "public",
