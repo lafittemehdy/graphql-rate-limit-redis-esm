@@ -1,150 +1,151 @@
-import type { GraphQLResolveInfo } from "graphql";
-import type { RateLimiterRedis } from "rate-limiter-flexible";
+import type { GraphQLResolveInfo, GraphQLSchema } from "graphql";
 
 /**
- * Configuration for the rate limit directive
+ * Options for the built-in default key generator.
  */
-export interface RateLimitDirectiveConfig<TContext = any> {
+export interface DefaultKeyGeneratorOptions {
   /**
-   * Custom key generator function
-   * Generates unique keys for rate limiting based on context
+   * Fallback identity label when no user/IP/api-key is available.
+   * @default "anonymous"
    */
-  keyGenerator?: KeyGenerator<TContext>;
+  anonymousIdentity?: string;
 
   /**
-   * Rate limiter class (must be RateLimiterRedis)
+   * Whether API key sources are considered for identity extraction.
+   * @default true
    */
-  limiterClass: typeof RateLimiterRedis;
+  includeApiKey?: boolean;
 
   /**
-   * Options passed to the rate limiter constructor
+   * Whether IP-based identity sources are considered.
+   * @default true
    */
-  limiterOptions: RateLimiterOptions;
+  includeIP?: boolean;
+
+  /**
+   * Whether user ID sources are considered for identity extraction.
+   * @default true
+   */
+  includeUserId?: boolean;
+
+  /**
+   * Whether forwarded headers (x-forwarded-for) are trusted.
+   * Only enable behind trusted proxies.
+   * @default false
+   */
+  trustProxy?: boolean;
 }
 
 /**
- * Arguments for the @rateLimit directive in GraphQL schema
+ * Function to generate rate limit keys.
+ * May return a promise for async identity resolution (e.g., DB lookups, JWT decoding).
+ */
+export type KeyGenerator<TContext = unknown> = (
+  directiveArgs: RateLimitDirectiveArgs,
+  source: unknown,
+  args: Record<string, unknown>,
+  context: TContext,
+  info: GraphQLResolveInfo,
+) => Promise<string> | string;
+
+/**
+ * Arguments for the @rateLimit directive in GraphQL schema.
  */
 export interface RateLimitDirectiveArgs {
-  /**
-   * Time window in seconds
-   */
+  /** Time window in seconds. */
   duration: number;
 
-  /**
-   * Maximum number of requests allowed in the duration window
-   */
+  /** Maximum number of requests allowed in the duration window. */
   limit: number;
 }
 
 /**
- * Options for rate limiter configuration
+ * Configuration for the rate limit directive.
+ */
+export interface RateLimitDirectiveConfig<TContext = unknown> {
+  /**
+   * Options used when generating the built-in default key generator.
+   * Ignored when a custom keyGenerator is provided.
+   */
+  defaultKeyGeneratorOptions?: DefaultKeyGeneratorOptions;
+
+  /**
+   * Custom key generator function.
+   * Generates unique keys for rate limiting based on context.
+   */
+  keyGenerator?: KeyGenerator<TContext>;
+
+  /**
+   * Rate limiter class compatible with the expected consume() contract.
+   */
+  limiterClass: RateLimiterClass;
+
+  /**
+   * Options passed to the rate limiter constructor.
+   */
+  limiterOptions: RateLimiterOptions;
+
+  /**
+   * Runtime safety limits for validation bounds.
+   */
+  runtimeLimits?: RateLimitRuntimeLimits;
+
+  /**
+   * Behavior when the limiter backend is unavailable.
+   * - failClosed: return service error (default, secure)
+   * - failOpen: bypass rate limiting and execute resolver
+   * @default "failClosed"
+   */
+  serviceErrorMode?: RateLimitServiceErrorMode;
+}
+
+/**
+ * Constructor interface for a rate limiter implementation.
+ */
+export type RateLimiterClass = new (
+  options: Record<string, unknown>,
+) => RateLimiterInstance;
+
+/**
+ * Minimal interface required from a limiter instance.
+ */
+export interface RateLimiterInstance {
+  consume(key: string): Promise<unknown>;
+}
+
+/**
+ * Options for rate limiter configuration.
  */
 export interface RateLimiterOptions {
-  /**
-   * Redis client instance
-   */
-  storeClient: any;
+  /** Redis client instance. */
+  storeClient: unknown;
+  [key: string]: unknown;
 }
 
 /**
- * Function to generate rate limit keys
+ * Runtime limit overrides for validation bounds.
  */
-export type KeyGenerator<TContext = any> = (
-  directiveArgs: RateLimitDirectiveArgs,
-  source: any,
-  args: Record<string, any>,
-  context: TContext,
-  info: GraphQLResolveInfo,
-) => string;
+export interface RateLimitRuntimeLimits {
+  /** Maximum allowed directive duration in seconds. */
+  maxDurationSeconds?: number;
 
-/**
- * Default key generator implementation
- * WARNING: This is NOT secure for per-user rate limiting!
- * Use createUserKeyGenerator or createIPKeyGenerator for production.
- */
-export const defaultKeyGenerator: KeyGenerator = (
-  _directiveArgs,
-  _source,
-  _args,
-  _context,
-  info,
-) => {
-  return `${info.parentType.name}.${info.fieldName}`;
-};
+  /** Maximum size for generated rate-limit keys. */
+  maxKeyLength?: number;
 
-/**
- * Creates a key generator that rate limits per user ID
- *
- * @param getUserId - Function to extract user ID from context
- * @returns KeyGenerator function
- *
- * @example
- * ```typescript
- * const keyGenerator = createUserKeyGenerator(
- *   (context) => context.user?.id || 'anonymous'
- * );
- * ```
- */
-export function createUserKeyGenerator<TContext = any>(
-  getUserId: (context: TContext) => string | null | undefined,
-): KeyGenerator<TContext> {
-  return (_directiveArgs, _source, _args, context, info) => {
-    const userId = getUserId(context) || "anonymous";
-    return `user:${userId}:${info.parentType.name}.${info.fieldName}`;
-  };
+  /** Maximum limiter instances (unique limit+duration pairs) per schema. */
+  maxLimiterCacheSize?: number;
+
+  /** Maximum allowed directive request limit. */
+  maxLimit?: number;
 }
 
 /**
- * Creates a key generator that rate limits per IP address
- *
- * @param getIP - Function to extract IP address from context
- * @returns KeyGenerator function
- *
- * @example
- * ```typescript
- * const keyGenerator = createIPKeyGenerator(
- *   (context) => context.req?.ip || context.req?.headers['x-forwarded-for'] || 'unknown'
- * );
- * ```
+ * Defines behavior when rate-limiter backend operations fail.
  */
-export function createIPKeyGenerator<TContext = any>(
-  getIP: (context: TContext) => string | null | undefined,
-): KeyGenerator<TContext> {
-  return (_directiveArgs, _source, _args, context, info) => {
-    const ip = getIP(context) || "unknown";
-    return `ip:${ip}:${info.parentType.name}.${info.fieldName}`;
-  };
-}
+export type RateLimitServiceErrorMode = "failClosed" | "failOpen";
 
 /**
- * Creates a composite key generator that combines multiple identifiers
- *
- * @param getIdentifiers - Function to extract multiple identifiers from context
- * @returns KeyGenerator function
- *
- * @example
- * ```typescript
- * const keyGenerator = createCompositeKeyGenerator(
- *   (context) => ({
- *     userId: context.user?.id,
- *     apiKey: context.apiKey,
- *   })
- * );
- * ```
+ * Schema transformer function returned by createRateLimitDirective.
+ * Applies rate limiting to fields decorated with the @rateLimit directive.
  */
-export function createCompositeKeyGenerator<TContext = any>(
-  getIdentifiers: (
-    context: TContext,
-  ) => Record<string, string | null | undefined>,
-): KeyGenerator<TContext> {
-  return (_directiveArgs, _source, _args, context, info) => {
-    const identifiers = getIdentifiers(context);
-    const identifierParts = Object.entries(identifiers)
-      .filter(([_, value]) => value != null)
-      .map(([key, value]) => `${key}:${value}`)
-      .join(":");
-
-    return `${identifierParts}:${info.parentType.name}.${info.fieldName}`;
-  };
-}
+export type SchemaTransformer = (schema: GraphQLSchema) => GraphQLSchema;

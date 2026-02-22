@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>graphql-rate-limit-redis-esm — Interactive Demo</title>
+	<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23030303'/><circle cx='16' cy='16' r='8' fill='none' stroke='%23AAAAAA' stroke-width='2'/><circle cx='16' cy='16' r='3' fill='%23D4A24C'/></svg>">
+	<style>
+
+		/* ================================================================
+		   CSS Variables
+		   ================================================================ */
+		:root {
+			--bg: #030303;
+			--bg-header: #0A0A0A;
+			--bg-surface: rgba(14, 14, 14, 0.92);
+			--bg-elevated: rgba(28, 28, 28, 0.6);
+			--border: rgba(255, 255, 255, 0.07);
+			--border-hover: rgba(255, 255, 255, 0.16);
+			--font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+			--text: #E0E0E0;
+			--text-secondary: #888888;
+			--text-muted: #666666;
+			--accent: #D4A24C;
+			--success: #80B858;
+			--error: #C86860;
+			--error-bright: #E06060;
+			--info: #7AA2D4;
+			--radius: 12px;
+			--header-h: 56px;
+			--flow-h: 64px;
+		}
+
+		/* ================================================================
+		   Reset & Base
+		   ================================================================ */
+		*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+		body {
+			background: var(--bg);
+			color: var(--text);
+			display: grid;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+			grid-template-rows: var(--header-h) var(--flow-h) 1fr;
+			height: 100vh;
+			overflow: hidden;
+			width: 100vw;
+		}
+
+		/* ================================================================
+		   Header
+		   ================================================================ */
+		#header {
+			align-items: center;
+			background: var(--bg-header);
+			border-bottom: 1px solid var(--border);
+			display: flex;
+			gap: 12px;
+			justify-content: space-between;
+			padding: 0 24px;
+			z-index: 10;
+		}
+
+		.header-left {
+			align-items: baseline;
+			display: flex;
+			gap: 12px;
+			min-width: 0;
+		}
+
+		.header-left h1 {
+			font-size: 13px;
+			font-weight: 600;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+			white-space: nowrap;
+		}
+
+		.header-left h1 a {
+			color: var(--text);
+			text-decoration: none;
+			transition: color 0.15s ease;
+		}
+
+		.header-left h1 a:hover { color: #F2F2F2; }
+
+		.header-subtitle {
+			color: var(--text-muted);
+			font-size: 11px;
+			white-space: nowrap;
+		}
+
+		.header-right {
+			align-items: center;
+			display: flex;
+			gap: 6px;
+		}
+
+		.header-btn {
+			background: transparent;
+			border: 1px solid var(--border);
+			border-radius: 16px;
+			color: var(--text-secondary);
+			cursor: pointer;
+			font-family: inherit;
+			font-size: 11px;
+			padding: 5px 12px;
+			transition: all 0.15s ease;
+			white-space: nowrap;
+		}
+
+		.header-btn:hover {
+			background: var(--bg-elevated);
+			border-color: var(--border-hover);
+			color: var(--text);
+		}
+
+		.header-btn.active {
+			border-color: var(--accent);
+			color: var(--text);
+		}
+
+		/* ================================================================
+		   Flow Diagram
+		   ================================================================ */
+		#flow-diagram {
+			align-items: center;
+			background: var(--bg-header);
+			border-bottom: 1px solid var(--border);
+			display: flex;
+			gap: 0;
+			justify-content: center;
+			padding: 0 24px;
+		}
+
+		.flow-step {
+			align-items: center;
+			display: flex;
+			gap: 0;
+		}
+
+		.flow-node {
+			backdrop-filter: blur(8px);
+			background: var(--bg-surface);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			color: var(--text-secondary);
+			font-family: var(--font-mono);
+			font-size: 11px;
+			padding: 6px 14px;
+			transition: all 0.2s ease;
+			white-space: nowrap;
+		}
+
+		.flow-node.active {
+			border-color: var(--accent);
+			box-shadow: 0 0 12px rgba(212, 162, 76, 0.25);
+			color: var(--text);
+		}
+
+		.flow-node[data-status="allowed"] {
+			border-color: var(--success);
+			box-shadow: 0 0 12px rgba(128, 184, 88, 0.25);
+			color: var(--success);
+		}
+
+		.flow-node[data-status="rejected"] {
+			border-color: var(--error);
+			box-shadow: 0 0 12px rgba(200, 104, 96, 0.25);
+			color: var(--error);
+		}
+
+		.flow-node[data-status="service-error"] {
+			border-color: var(--accent);
+			box-shadow: 0 0 12px rgba(212, 162, 76, 0.25);
+			color: var(--accent);
+		}
+
+		.flow-node[data-status="bypassed"] {
+			border-color: var(--info);
+			box-shadow: 0 0 12px rgba(122, 162, 212, 0.25);
+			color: var(--info);
+		}
+
+		.flow-arrow {
+			color: var(--text-muted);
+			font-size: 16px;
+			padding: 0 10px;
+		}
+
+		/* ================================================================
+		   Main Grid
+		   ================================================================ */
+		#main-grid {
+			display: grid;
+			grid-template-columns: 320px 1fr 380px;
+			overflow: hidden;
+		}
+
+		/* ================================================================
+		   Panels
+		   ================================================================ */
+		.panel {
+			border-right: 1px solid var(--border);
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+
+		.panel:last-child { border-right: none; }
+
+		.panel-header {
+			align-items: center;
+			border-bottom: 1px solid var(--border);
+			color: var(--text-muted);
+			display: flex;
+			font-size: 10px;
+			font-weight: 600;
+			gap: 8px;
+			justify-content: space-between;
+			letter-spacing: 0.08em;
+			padding: 10px 16px;
+			text-transform: uppercase;
+		}
+
+		.panel-body {
+			flex: 1;
+			overflow-y: auto;
+			padding: 16px;
+		}
+
+		/* ================================================================
+		   Request Simulator
+		   ================================================================ */
+		.control-group {
+			margin-bottom: 14px;
+		}
+
+		.control-group label {
+			color: var(--text-muted);
+			display: block;
+			font-family: var(--font-mono);
+			font-size: 10px;
+			letter-spacing: 0.06em;
+			margin-bottom: 6px;
+			text-transform: uppercase;
+		}
+
+		.control-row {
+			align-items: center;
+			display: flex;
+			gap: 10px;
+		}
+
+		.control-row input[type="range"] {
+			accent-color: var(--accent);
+			flex: 1;
+		}
+
+		.control-value {
+			color: var(--accent);
+			font-family: var(--font-mono);
+			font-size: 13px;
+			font-weight: 600;
+			min-width: 28px;
+			text-align: right;
+		}
+
+		.control-select {
+			appearance: none;
+			background: var(--bg-elevated);
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			color: var(--text);
+			font-family: inherit;
+			font-size: 12px;
+			outline: none;
+			padding: 6px 10px;
+			transition: border-color 0.15s ease;
+			width: 100%;
+		}
+
+		.control-select:focus { border-color: rgba(212, 162, 76, 0.4); }
+
+		.toggle-group {
+			display: flex;
+			gap: 4px;
+		}
+
+		.toggle-btn {
+			background: transparent;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			color: var(--text-muted);
+			cursor: pointer;
+			flex: 1;
+			font-family: var(--font-mono);
+			font-size: 11px;
+			padding: 5px 8px;
+			transition: all 0.15s ease;
+		}
+
+		.toggle-btn:hover {
+			border-color: var(--border-hover);
+			color: var(--text-secondary);
+		}
+
+		.toggle-btn.active {
+			border-color: var(--accent);
+			color: var(--text);
+		}
+
+		/* Schema & Query Preview */
+		.code-block {
+			background: rgba(0, 0, 0, 0.3);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			font-family: var(--font-mono);
+			font-size: 11px;
+			line-height: 1.6;
+			margin-bottom: 14px;
+			overflow-x: auto;
+			padding: 10px 14px;
+		}
+
+		.code-block .keyword { color: var(--accent); }
+		.code-block .type { color: var(--info); }
+		.code-block .directive { color: var(--success); }
+		.code-block .string { color: #C08060; }
+		.code-block .number { color: #D88A62; }
+
+		.key-display {
+			align-items: center;
+			background: rgba(0, 0, 0, 0.2);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			display: flex;
+			gap: 8px;
+			margin-bottom: 14px;
+			padding: 8px 12px;
+		}
+
+		.key-label {
+			color: var(--text-muted);
+			font-size: 10px;
+			text-transform: uppercase;
+			white-space: nowrap;
+		}
+
+		.key-value {
+			color: var(--accent);
+			font-family: var(--font-mono);
+			font-size: 12px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		/* Action Buttons */
+		.btn-primary {
+			background: transparent;
+			border: 1px solid var(--accent);
+			border-radius: 8px;
+			color: var(--accent);
+			cursor: pointer;
+			font-family: inherit;
+			font-size: 13px;
+			font-weight: 600;
+			margin-bottom: 8px;
+			padding: 10px;
+			transition: all 0.15s ease;
+			width: 100%;
+		}
+
+		.btn-primary:hover {
+			background: rgba(212, 162, 76, 0.1);
+		}
+
+		.btn-primary:active {
+			background: rgba(212, 162, 76, 0.18);
+		}
+
+		.btn-danger {
+			background: transparent;
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			color: var(--text-muted);
+			cursor: pointer;
+			font-family: var(--font-mono);
+			font-size: 11px;
+			padding: 7px;
+			transition: all 0.15s ease;
+			width: 100%;
+		}
+
+		.btn-danger:hover {
+			border-color: var(--error);
+			color: var(--error);
+		}
+
+		.btn-danger.active {
+			background: rgba(200, 104, 96, 0.1);
+			border-color: var(--error);
+			color: var(--error);
+		}
+
+		.btn-small {
+			background: transparent;
+			border: 1px solid var(--border);
+			border-radius: 4px;
+			color: var(--text-muted);
+			cursor: pointer;
+			font-family: inherit;
+			font-size: 9px;
+			letter-spacing: 0.06em;
+			padding: 3px 8px;
+			text-transform: uppercase;
+			transition: all 0.15s ease;
+		}
+
+		.btn-small:hover {
+			border-color: var(--border-hover);
+			color: var(--text-secondary);
+		}
+
+		/* ================================================================
+		   Rate Limit State
+		   ================================================================ */
+		#panel-state .panel-body {
+			align-items: center;
+			display: flex;
+			flex-direction: column;
+			gap: 20px;
+			justify-content: center;
+		}
+
+		/* Bucket Gauge */
+		#bucket-container {
+			align-items: center;
+			display: flex;
+			flex-direction: column;
+			gap: 12px;
+		}
+
+		#bucket {
+			background: rgba(0, 0, 0, 0.3);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			height: 200px;
+			overflow: hidden;
+			position: relative;
+			width: 120px;
+		}
+
+		#bucket-fill {
+			background: var(--success);
+			border-radius: 0 0 7px 7px;
+			bottom: 0;
+			left: 0;
+			position: absolute;
+			right: 0;
+			transition: height 0.25s ease, background 0.3s ease;
+		}
+
+		#bucket-slots {
+			display: flex;
+			flex-direction: column-reverse;
+			height: 100%;
+			justify-content: flex-start;
+			padding: 4px;
+			position: relative;
+			z-index: 1;
+		}
+
+		.bucket-slot {
+			align-items: center;
+			border-radius: 3px;
+			display: flex;
+			flex-shrink: 0;
+			height: 18px;
+			justify-content: center;
+			margin-bottom: 2px;
+			transition: opacity 0.2s ease;
+		}
+
+		.bucket-slot.filled {
+			opacity: 1;
+		}
+
+		.bucket-slot.empty {
+			opacity: 0.15;
+		}
+
+		.bucket-slot-dot {
+			background: var(--text);
+			border-radius: 50%;
+			height: 4px;
+			width: 4px;
+		}
+
+		#bucket-label {
+			color: var(--text-secondary);
+			font-family: var(--font-mono);
+			font-size: 13px;
+		}
+
+		#bucket-label .highlight {
+			color: var(--text);
+			font-weight: 600;
+		}
+
+		/* Status */
+		#status-indicator {
+			align-items: center;
+			display: flex;
+			gap: 8px;
+		}
+
+		.status-dot {
+			border-radius: 50%;
+			display: inline-block;
+			height: 8px;
+			width: 8px;
+		}
+
+		.status-dot.status-ok { background: var(--success); }
+		.status-dot.status-limited { background: var(--error); }
+		.status-dot.status-error { background: var(--accent); }
+		.status-dot.status-bypassed { background: var(--info); }
+
+		#status-text {
+			color: var(--text-secondary);
+			font-size: 12px;
+		}
+
+		/* Countdown */
+		#countdown-container {
+			width: 100%;
+		}
+
+		#countdown-container.hidden { display: none; }
+
+		#countdown-bar-track {
+			background: rgba(255, 255, 255, 0.04);
+			border-radius: 4px;
+			height: 6px;
+			margin-bottom: 6px;
+			overflow: hidden;
+			width: 100%;
+		}
+
+		#countdown-bar {
+			background: linear-gradient(90deg, var(--error), var(--accent));
+			border-radius: 4px;
+			height: 100%;
+			transition: width 0.1s linear;
+			width: 100%;
+		}
+
+		#countdown-text {
+			color: var(--text-muted);
+			font-family: var(--font-mono);
+			font-size: 11px;
+			text-align: center;
+			width: 100%;
+		}
+
+		/* Redis State */
+		#redis-state {
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			padding: 12px;
+			width: 100%;
+		}
+
+		.panel-subheader {
+			color: var(--text-muted);
+			font-size: 10px;
+			font-weight: 600;
+			letter-spacing: 0.08em;
+			margin-bottom: 10px;
+			text-transform: uppercase;
+		}
+
+		.redis-row {
+			align-items: center;
+			display: flex;
+			font-family: var(--font-mono);
+			font-size: 11px;
+			justify-content: space-between;
+			padding: 3px 0;
+		}
+
+		.redis-key { color: var(--text-muted); }
+		.redis-value { color: var(--accent); }
+
+		.redis-offline {
+			color: var(--error);
+			font-family: var(--font-mono);
+			font-size: 11px;
+			font-style: italic;
+			padding: 4px 0;
+		}
+
+		#redis-status {
+			align-items: center;
+			border-top: 1px solid var(--border);
+			display: flex;
+			gap: 6px;
+			margin-top: 8px;
+			padding-top: 8px;
+		}
+
+		#redis-status-text {
+			color: var(--text-muted);
+			font-size: 10px;
+		}
+
+		/* ================================================================
+		   Response Log
+		   ================================================================ */
+		.log-scroll {
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+			padding: 8px;
+		}
+
+		.log-entry {
+			animation: fadeIn 0.15s ease;
+			border-left: 3px solid var(--border);
+			border-radius: 4px;
+			padding: 8px 10px;
+		}
+
+		.log-entry.allowed { border-left-color: var(--success); }
+		.log-entry.rejected { border-left-color: var(--error); }
+		.log-entry.service-error { border-left-color: var(--accent); }
+		.log-entry.bypassed { border-left-color: var(--info); }
+
+		.log-meta {
+			align-items: center;
+			display: flex;
+			gap: 8px;
+			margin-bottom: 4px;
+		}
+
+		.log-time {
+			color: var(--text-muted);
+			font-family: var(--font-mono);
+			font-size: 10px;
+		}
+
+		.log-status-code {
+			border: 1px solid;
+			border-radius: 3px;
+			font-family: var(--font-mono);
+			font-size: 10px;
+			font-weight: 700;
+			padding: 1px 5px;
+		}
+
+		.log-entry.allowed .log-status-code {
+			border-color: rgba(128, 184, 88, 0.4);
+			color: var(--success);
+		}
+
+		.log-entry.rejected .log-status-code {
+			border-color: rgba(200, 104, 96, 0.4);
+			color: var(--error);
+		}
+
+		.log-entry.service-error .log-status-code {
+			border-color: rgba(212, 162, 76, 0.4);
+			color: var(--accent);
+		}
+
+		.log-entry.bypassed .log-status-code {
+			border-color: rgba(122, 162, 212, 0.4);
+			color: var(--info);
+		}
+
+		.log-key-display {
+			color: var(--text-muted);
+			font-family: var(--font-mono);
+			font-size: 10px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.log-response {
+			background: rgba(0, 0, 0, 0.2);
+			border-radius: 4px;
+			color: var(--text-secondary);
+			font-family: var(--font-mono);
+			font-size: 10px;
+			line-height: 1.5;
+			overflow-x: auto;
+			padding: 6px 8px;
+			white-space: pre;
+		}
+
+		.log-empty {
+			color: var(--text-muted);
+			font-size: 12px;
+			font-style: italic;
+			padding: 20px;
+			text-align: center;
+		}
+
+		@keyframes fadeIn {
+			from { opacity: 0; transform: translateY(4px); }
+			to { opacity: 1; transform: translateY(0); }
+		}
+
+		/* ================================================================
+		   Responsive
+		   ================================================================ */
+		@media (max-width: 1024px) {
+			body {
+				grid-template-rows: var(--header-h) 1fr;
+				overflow-y: auto;
+			}
+
+			#flow-diagram { display: none; }
+
+			#main-grid {
+				grid-template-columns: 1fr;
+				grid-template-rows: auto auto auto;
+				overflow-y: auto;
+			}
+
+			.panel { border-right: none; border-bottom: 1px solid var(--border); }
+
+			#panel-state .panel-body { min-height: 320px; }
+
+			.log-scroll { max-height: 400px; }
+		}
+
+		@media (max-width: 768px) {
+			#header { padding: 0 12px; }
+
+			.header-right { display: none; }
+
+			.panel-body { padding: 12px; }
+		}
+
+	</style>
+</head>
+<body>
+
+	<!-- Header -->
+	<header id="header">
+		<div class="header-left">
+			<h1><a href="https://github.com/lafittemehdy/graphql-rate-limit-redis-esm">graphql-rate-limit-redis-esm</a></h1>
+			<span class="header-subtitle">Interactive Demo</span>
+		</div>
+		<div class="header-right">
+			<button class="header-btn" data-scenario="normal">Normal Usage</button>
+			<button class="header-btn" data-scenario="burst">Burst Attack</button>
+			<button class="header-btn" data-scenario="outage">Redis Outage</button>
+			<button class="header-btn" data-scenario="reset">Reset</button>
+		</div>
+	</header>
+
+	<!-- Flow Diagram -->
+	<section id="flow-diagram">
+		<div class="flow-step">
+			<div class="flow-node" id="flow-request">Request</div>
+			<span class="flow-arrow">&#8594;</span>
+		</div>
+		<div class="flow-step">
+			<div class="flow-node" id="flow-keygen">Key Gen</div>
+			<span class="flow-arrow">&#8594;</span>
+		</div>
+		<div class="flow-step">
+			<div class="flow-node" id="flow-redis">Redis Consume</div>
+			<span class="flow-arrow">&#8594;</span>
+		</div>
+		<div class="flow-step">
+			<div class="flow-node" id="flow-result">Allow / Reject</div>
+		</div>
+	</section>
+
+	<!-- Main Content -->
+	<main id="main-grid">
+
+		<!-- Left: Request Simulator -->
+		<section id="panel-request" class="panel">
+			<div class="panel-header">Request Simulator</div>
+			<div class="panel-body">
+
+				<div class="control-group">
+					<label>Limit (requests per window)</label>
+					<div class="control-row">
+						<input type="range" id="input-limit" min="1" max="20" value="5">
+						<span class="control-value" id="label-limit">5</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label>Duration (seconds)</label>
+					<div class="control-row">
+						<input type="range" id="input-duration" min="5" max="120" value="60">
+						<span class="control-value" id="label-duration">60</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label>Identity</label>
+					<select class="control-select" id="select-identity">
+						<option value="user">Authenticated User (user:123)</option>
+						<option value="ip">IP Only (192.168.1.1)</option>
+						<option value="anonymous">Anonymous</option>
+					</select>
+				</div>
+
+				<div class="control-group">
+					<label>Service Error Mode</label>
+					<div class="toggle-group">
+						<button class="toggle-btn active" id="btn-fail-closed">failClosed</button>
+						<button class="toggle-btn" id="btn-fail-open">failOpen</button>
+					</div>
+				</div>
+
+				<div class="code-block">
+					<span class="keyword">type</span> <span class="type">Query</span> {<br>
+					&nbsp;&nbsp;login: <span class="type">String!</span> <span class="directive">@rateLimit</span>(limit: <span class="number" id="schema-limit">5</span>, duration: <span class="number" id="schema-duration">60</span>)<br>
+					}
+				</div>
+
+				<div class="code-block">
+					<span class="keyword">query</span> { login(email: <span class="string">"user@example.com"</span>) }
+				</div>
+
+				<div class="key-display">
+					<span class="key-label">Key:</span>
+					<code class="key-value" id="key-value">user:123:Query.login</code>
+				</div>
+
+				<button class="btn-primary" id="btn-send">Send Query</button>
+				<button class="btn-danger" id="btn-redis-down">Simulate Redis Down</button>
+			</div>
+		</section>
+
+		<!-- Center: Rate Limit State -->
+		<section id="panel-state" class="panel">
+			<div class="panel-header">Rate Limit State</div>
+			<div class="panel-body">
+
+				<div id="bucket-container">
+					<div id="bucket">
+						<div id="bucket-fill"></div>
+						<div id="bucket-slots"></div>
+					</div>
+					<div id="bucket-label">
+						<span class="highlight" id="bucket-used">0</span> / <span class="highlight" id="bucket-total">5</span> requests used
+					</div>
+				</div>
+
+				<div id="status-indicator">
+					<span class="status-dot status-ok" id="status-dot"></span>
+					<span id="status-text">Accepting requests</span>
+				</div>
+
+				<div id="countdown-container" class="hidden">
+					<div id="countdown-bar-track">
+						<div id="countdown-bar"></div>
+					</div>
+					<div id="countdown-text">
+						Window resets in <span id="countdown-seconds">0</span>s
+					</div>
+				</div>
+
+				<div id="redis-state">
+					<div class="panel-subheader">Redis State</div>
+					<div id="redis-entries"></div>
+					<div id="redis-status">
+						<span class="status-dot status-ok" id="redis-status-dot"></span>
+						<span id="redis-status-text">Connected</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<!-- Right: Response Log -->
+		<section id="panel-log" class="panel">
+			<div class="panel-header">
+				Response Log
+				<button class="btn-small" id="btn-clear-log">Clear</button>
+			</div>
+			<div id="log-entries" class="panel-body log-scroll">
+				<div class="log-empty" id="log-empty">Send a query to see responses here.</div>
+			</div>
+		</section>
+
+	</main>
+
+	<script>
+	(function () {
+		'use strict';
+
+		/* =============================================================
+		   State
+		   ============================================================= */
+		const state = {
+			config: {
+				duration: 60,
+				identity: 'user',
+				limit: 5,
+				serviceErrorMode: 'failClosed',
+			},
+			limiter: {
+				consumed: 0,
+				redisDown: false,
+				windowEnd: 0,
+				windowStarted: false,
+			},
+			ui: {
+				countdownInterval: null,
+				sending: false,
+			},
+		};
+
+		/* =============================================================
+		   DOM Cache
+		   ============================================================= */
+		const dom = {};
+
+		function cacheDom() {
+			dom.btnClearLog = document.getElementById('btn-clear-log');
+			dom.btnFailClosed = document.getElementById('btn-fail-closed');
+			dom.btnFailOpen = document.getElementById('btn-fail-open');
+			dom.btnRedisDown = document.getElementById('btn-redis-down');
+			dom.btnSend = document.getElementById('btn-send');
+			dom.bucketFill = document.getElementById('bucket-fill');
+			dom.bucketLabel = document.getElementById('bucket-label');
+			dom.bucketSlots = document.getElementById('bucket-slots');
+			dom.bucketTotal = document.getElementById('bucket-total');
+			dom.bucketUsed = document.getElementById('bucket-used');
+			dom.countdownBar = document.getElementById('countdown-bar');
+			dom.countdownContainer = document.getElementById('countdown-container');
+			dom.countdownSeconds = document.getElementById('countdown-seconds');
+			dom.flowKeygen = document.getElementById('flow-keygen');
+			dom.flowRedis = document.getElementById('flow-redis');
+			dom.flowRequest = document.getElementById('flow-request');
+			dom.flowResult = document.getElementById('flow-result');
+			dom.inputDuration = document.getElementById('input-duration');
+			dom.inputLimit = document.getElementById('input-limit');
+			dom.keyValue = document.getElementById('key-value');
+			dom.labelDuration = document.getElementById('label-duration');
+			dom.labelLimit = document.getElementById('label-limit');
+			dom.logEmpty = document.getElementById('log-empty');
+			dom.logEntries = document.getElementById('log-entries');
+			dom.redisEntries = document.getElementById('redis-entries');
+			dom.redisStatusDot = document.getElementById('redis-status-dot');
+			dom.redisStatusText = document.getElementById('redis-status-text');
+			dom.schemaDuration = document.getElementById('schema-duration');
+			dom.schemaLimit = document.getElementById('schema-limit');
+			dom.selectIdentity = document.getElementById('select-identity');
+			dom.statusDot = document.getElementById('status-dot');
+			dom.statusText = document.getElementById('status-text');
+		}
+
+		/* =============================================================
+		   Simulation Engine
+		   ============================================================= */
+
+		/** Generates the rate limit key from the current identity selection. */
+		function generateKey() {
+			const prefixes = {
+				anonymous: 'anonymous',
+				ip: 'ip:192.168.1.1',
+				user: 'user:123',
+			};
+			return prefixes[state.config.identity] + ':Query.login';
+		}
+
+		/**
+		 * Simulates a single GraphQL request through the rate-limiting pipeline.
+		 * Mirrors the directive.ts resolver wrapper logic:
+		 *   1. Generate key
+		 *   2. Check Redis availability
+		 *   3. Consume from rate limiter
+		 *   4. Return result or error
+		 */
+		function simulateRequest() {
+			const now = Date.now();
+			const key = generateKey();
+
+			/* Check Redis availability first */
+			if (state.limiter.redisDown) {
+				if (state.config.serviceErrorMode === 'failOpen') {
+					return {
+						key,
+						response: { data: { login: 'ok' } },
+						status: 'bypassed',
+						statusCode: 200,
+						timestamp: now,
+					};
+				}
+				return {
+					key,
+					response: {
+						errors: [{
+							extensions: {
+								code: 'RATE_LIMIT_SERVICE_ERROR',
+								http: { status: 503 },
+							},
+							message: 'Rate limiting service unavailable',
+						}],
+					},
+					status: 'service-error',
+					statusCode: 503,
+					timestamp: now,
+				};
+			}
+
+			/* Initialize or reset window */
+			if (!state.limiter.windowStarted || now >= state.limiter.windowEnd) {
+				state.limiter.windowStarted = true;
+				state.limiter.windowEnd = now + state.config.duration * 1000;
+				state.limiter.consumed = 0;
+			}
+
+			/* Consume */
+			state.limiter.consumed++;
+
+			if (state.limiter.consumed > state.config.limit) {
+				const msBeforeNext = state.limiter.windowEnd - now;
+				const retryAfter = Math.max(1, Math.ceil(msBeforeNext / 1000));
+				return {
+					key,
+					response: {
+						errors: [{
+							extensions: {
+								code: 'RATE_LIMITED',
+								http: { status: 429 },
+								retryAfter,
+							},
+							message: 'Rate limit exceeded',
+						}],
+					},
+					retryAfter,
+					status: 'rejected',
+					statusCode: 429,
+					timestamp: now,
+				};
+			}
+
+			return {
+				key,
+				response: { data: { login: 'ok' } },
+				status: 'allowed',
+				statusCode: 200,
+				timestamp: now,
+			};
+		}
+
+		/* =============================================================
+		   Rendering
+		   ============================================================= */
+
+		/** Escapes HTML entities. */
+		function esc(str) {
+			return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		}
+
+		/** Updates the bucket gauge visualization. */
+		function renderBucket() {
+			const used = Math.min(state.limiter.consumed, state.config.limit);
+			const total = state.config.limit;
+			const pct = total > 0 ? (used / total) * 100 : 0;
+
+			dom.bucketFill.style.height = pct + '%';
+			dom.bucketUsed.textContent = used;
+			dom.bucketTotal.textContent = total;
+
+			if (pct < 60) {
+				dom.bucketFill.style.background = 'var(--success)';
+			} else if (pct < 90) {
+				dom.bucketFill.style.background = 'var(--accent)';
+			} else {
+				dom.bucketFill.style.background = 'var(--error)';
+			}
+
+			/* Render slot indicators */
+			dom.bucketSlots.innerHTML = '';
+			for (let i = 0; i < total; i++) {
+				const slot = document.createElement('div');
+				slot.className = 'bucket-slot ' + (i < used ? 'filled' : 'empty');
+				const dot = document.createElement('div');
+				dot.className = 'bucket-slot-dot';
+				slot.appendChild(dot);
+				dom.bucketSlots.appendChild(slot);
+			}
+		}
+
+		/** Updates the status indicator. */
+		function renderStatus(result) {
+			const map = {
+				allowed: { cls: 'status-ok', text: 'Accepting requests' },
+				bypassed: { cls: 'status-bypassed', text: 'Bypassed (failOpen)' },
+				rejected: { cls: 'status-limited', text: 'Rate limited' },
+				'service-error': { cls: 'status-error', text: 'Service unavailable' },
+			};
+			const info = map[result.status] || map.allowed;
+			dom.statusDot.className = 'status-dot ' + info.cls;
+			dom.statusText.textContent = info.text;
+		}
+
+		/** Appends a log entry and auto-scrolls. */
+		function renderLogEntry(result) {
+			if (dom.logEmpty) {
+				dom.logEmpty.remove();
+				dom.logEmpty = null;
+			}
+
+			const entry = document.createElement('div');
+			entry.className = 'log-entry ' + result.status;
+
+			const time = new Date(result.timestamp).toLocaleTimeString();
+			const json = JSON.stringify(result.response, null, 2);
+
+			entry.innerHTML =
+				'<div class="log-meta">' +
+					'<span class="log-time">' + esc(time) + '</span>' +
+					'<span class="log-status-code">' + result.statusCode + '</span>' +
+					'<span class="log-key-display">' + esc(result.key) + '</span>' +
+				'</div>' +
+				'<pre class="log-response">' + esc(json) + '</pre>';
+
+			dom.logEntries.appendChild(entry);
+			dom.logEntries.scrollTop = dom.logEntries.scrollHeight;
+		}
+
+		/** Updates the generated key display. */
+		function renderKey() {
+			dom.keyValue.textContent = generateKey();
+		}
+
+		/** Updates schema preview numbers. */
+		function renderSchemaPreview() {
+			dom.schemaLimit.textContent = state.config.limit;
+			dom.schemaDuration.textContent = state.config.duration;
+		}
+
+		/** Animates the flow diagram nodes in sequence. */
+		function animateFlow(result) {
+			const nodes = [dom.flowRequest, dom.flowKeygen, dom.flowRedis, dom.flowResult];
+			const delays = [0, 100, 200, 300];
+
+			/* Clear previous result status */
+			dom.flowResult.removeAttribute('data-status');
+
+			nodes.forEach(function (el, i) {
+				setTimeout(function () {
+					el.classList.add('active');
+					setTimeout(function () { el.classList.remove('active'); }, 250);
+				}, delays[i]);
+			});
+
+			/* Set result node status after animation completes */
+			setTimeout(function () {
+				dom.flowResult.dataset.status = result.status;
+			}, 300);
+		}
+
+		/** Renders the Redis state mini-visualization. */
+		function renderRedisState() {
+			if (state.limiter.redisDown) {
+				dom.redisEntries.innerHTML = '<div class="redis-offline">Connection refused</div>';
+				dom.redisStatusDot.className = 'status-dot status-error';
+				dom.redisStatusText.textContent = 'Disconnected';
+				return;
+			}
+
+			const key = generateKey();
+			const ttl = state.limiter.windowStarted
+				? Math.max(0, Math.ceil((state.limiter.windowEnd - Date.now()) / 1000))
+				: state.config.duration;
+
+			dom.redisEntries.innerHTML =
+				'<div class="redis-row">' +
+					'<span class="redis-key">' + esc(key) + '</span>' +
+					'<span class="redis-value">' + state.limiter.consumed + ' / ' + state.config.limit + '</span>' +
+				'</div>' +
+				'<div class="redis-row">' +
+					'<span class="redis-key">TTL</span>' +
+					'<span class="redis-value">' + ttl + 's</span>' +
+				'</div>';
+
+			dom.redisStatusDot.className = 'status-dot status-ok';
+			dom.redisStatusText.textContent = 'Connected';
+		}
+
+		/* =============================================================
+		   Countdown Timer
+		   ============================================================= */
+
+		/** Starts or restarts the countdown timer for window reset. */
+		function startCountdown() {
+			if (state.ui.countdownInterval) {
+				clearInterval(state.ui.countdownInterval);
+			}
+
+			dom.countdownContainer.classList.remove('hidden');
+
+			state.ui.countdownInterval = setInterval(function () {
+				const remaining = Math.max(0, state.limiter.windowEnd - Date.now());
+				const seconds = Math.ceil(remaining / 1000);
+				const totalMs = state.config.duration * 1000;
+
+				dom.countdownSeconds.textContent = seconds;
+				dom.countdownBar.style.width = ((remaining / totalMs) * 100) + '%';
+
+				renderRedisState();
+
+				if (remaining <= 0) {
+					clearInterval(state.ui.countdownInterval);
+					state.ui.countdownInterval = null;
+					state.limiter.windowStarted = false;
+					state.limiter.consumed = 0;
+					dom.countdownContainer.classList.add('hidden');
+					renderBucket();
+					renderStatus({ status: 'allowed' });
+					renderRedisState();
+				}
+			}, 100);
+		}
+
+		/* =============================================================
+		   Event Handlers
+		   ============================================================= */
+
+		/** Handles the "Send Query" action. */
+		function handleSendQuery() {
+			if (state.ui.sending) return;
+			state.ui.sending = true;
+
+			var result = simulateRequest();
+
+			renderBucket();
+			renderStatus(result);
+			renderLogEntry(result);
+			renderRedisState();
+			animateFlow(result);
+
+			if (state.limiter.windowStarted) {
+				startCountdown();
+			}
+
+			setTimeout(function () { state.ui.sending = false; }, 50);
+		}
+
+		/** Resets all state and UI to initial values. */
+		function handleReset() {
+			if (state.ui.countdownInterval) {
+				clearInterval(state.ui.countdownInterval);
+				state.ui.countdownInterval = null;
+			}
+
+			state.limiter.consumed = 0;
+			state.limiter.redisDown = false;
+			state.limiter.windowEnd = 0;
+			state.limiter.windowStarted = false;
+
+			dom.logEntries.innerHTML = '<div class="log-empty" id="log-empty">Send a query to see responses here.</div>';
+			dom.logEmpty = document.getElementById('log-empty');
+			dom.countdownContainer.classList.add('hidden');
+			dom.btnRedisDown.classList.remove('active');
+			dom.btnRedisDown.textContent = 'Simulate Redis Down';
+			dom.flowResult.removeAttribute('data-status');
+
+			renderBucket();
+			renderStatus({ status: 'allowed' });
+			renderKey();
+			renderRedisState();
+
+			/* Clear active state on scenario buttons */
+			document.querySelectorAll('.header-btn').forEach(function (btn) {
+				btn.classList.remove('active');
+			});
+		}
+
+		/** Updates config UI controls to match current state. */
+		function syncConfigUI() {
+			dom.inputLimit.value = state.config.limit;
+			dom.labelLimit.textContent = state.config.limit;
+			dom.inputDuration.value = state.config.duration;
+			dom.labelDuration.textContent = state.config.duration;
+			renderSchemaPreview();
+			renderKey();
+			renderBucket();
+		}
+
+		/** Toggles Redis availability simulation. */
+		function toggleRedisDown() {
+			state.limiter.redisDown = !state.limiter.redisDown;
+			dom.btnRedisDown.classList.toggle('active', state.limiter.redisDown);
+			dom.btnRedisDown.textContent = state.limiter.redisDown ? 'Restore Redis' : 'Simulate Redis Down';
+			renderRedisState();
+		}
+
+		/** Runs a preset scenario. */
+		function handleScenario(scenario) {
+			handleReset();
+
+			/* Highlight active scenario button */
+			document.querySelectorAll('.header-btn').forEach(function (btn) {
+				btn.classList.toggle('active', btn.dataset.scenario === scenario);
+			});
+
+			switch (scenario) {
+				case 'normal':
+					state.config.limit = 5;
+					state.config.duration = 30;
+					syncConfigUI();
+					handleSendQuery();
+					setTimeout(handleSendQuery, 300);
+					setTimeout(handleSendQuery, 600);
+					break;
+
+				case 'burst':
+					state.config.limit = 5;
+					state.config.duration = 10;
+					syncConfigUI();
+					(function fireBurst(i) {
+						if (i >= state.config.limit + 3) return;
+						handleSendQuery();
+						setTimeout(function () { fireBurst(i + 1); }, 150);
+					})(0);
+					break;
+
+				case 'outage':
+					state.config.limit = 5;
+					state.config.duration = 30;
+					syncConfigUI();
+					handleSendQuery();
+					setTimeout(handleSendQuery, 200);
+					setTimeout(function () {
+						state.limiter.redisDown = true;
+						dom.btnRedisDown.classList.add('active');
+						dom.btnRedisDown.textContent = 'Restore Redis';
+						renderRedisState();
+						setTimeout(handleSendQuery, 200);
+						setTimeout(handleSendQuery, 400);
+					}, 500);
+					break;
+
+				case 'reset':
+					/* Already reset above */
+					break;
+			}
+		}
+
+		/* =============================================================
+		   Initialization
+		   ============================================================= */
+		function init() {
+			cacheDom();
+
+			/* Limit slider */
+			dom.inputLimit.addEventListener('input', function () {
+				state.config.limit = parseInt(this.value, 10);
+				dom.labelLimit.textContent = state.config.limit;
+				renderSchemaPreview();
+				renderBucket();
+			});
+
+			/* Duration slider */
+			dom.inputDuration.addEventListener('input', function () {
+				state.config.duration = parseInt(this.value, 10);
+				dom.labelDuration.textContent = state.config.duration;
+				renderSchemaPreview();
+			});
+
+			/* Identity select */
+			dom.selectIdentity.addEventListener('change', function () {
+				state.config.identity = this.value;
+				renderKey();
+				renderRedisState();
+			});
+
+			/* Service error mode toggle */
+			dom.btnFailClosed.addEventListener('click', function () {
+				state.config.serviceErrorMode = 'failClosed';
+				dom.btnFailClosed.classList.add('active');
+				dom.btnFailOpen.classList.remove('active');
+			});
+
+			dom.btnFailOpen.addEventListener('click', function () {
+				state.config.serviceErrorMode = 'failOpen';
+				dom.btnFailOpen.classList.add('active');
+				dom.btnFailClosed.classList.remove('active');
+			});
+
+			/* Send query */
+			dom.btnSend.addEventListener('click', handleSendQuery);
+
+			/* Redis down toggle */
+			dom.btnRedisDown.addEventListener('click', toggleRedisDown);
+
+			/* Clear log */
+			dom.btnClearLog.addEventListener('click', function () {
+				dom.logEntries.innerHTML = '<div class="log-empty" id="log-empty">Send a query to see responses here.</div>';
+				dom.logEmpty = document.getElementById('log-empty');
+			});
+
+			/* Scenario buttons */
+			document.querySelectorAll('.header-btn[data-scenario]').forEach(function (btn) {
+				btn.addEventListener('click', function () {
+					handleScenario(this.dataset.scenario);
+				});
+			});
+
+			/* Keyboard shortcut: Space / Enter to send */
+			document.addEventListener('keydown', function (e) {
+				if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+				if (e.key === ' ' || e.key === 'Enter') {
+					e.preventDefault();
+					handleSendQuery();
+				}
+			});
+
+			/* Initial render */
+			renderBucket();
+			renderKey();
+			renderSchemaPreview();
+			renderRedisState();
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', init);
+		} else {
+			init();
+		}
+	})();
+	</script>
+
+</body>
+</html>
