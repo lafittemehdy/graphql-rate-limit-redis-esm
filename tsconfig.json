@@ -1,21 +1,16 @@
 {
-    "compilerOptions": {
-        "declaration": true,
-        "esModuleInterop": true,
-        "forceConsistentCasingInFileNames": true,
-        "module": "Node16",
-        "moduleResolution": "node16",
-        "outDir": "./dist",
-        "rootDir": "./src",
-        "skipLibCheck": true,
-        "strict": true,
-        "target": "ES2022"
-    },
-    "exclude": [
-        "dist",
-        "node_modules"
-    ],
-    "include": [
-        "src/**/*"
-    ]
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2024"
+  },
+  "exclude": ["dist", "node_modules", "src/__tests__", "src/bench.ts"],
+  "include": ["src/**/*"]
 }

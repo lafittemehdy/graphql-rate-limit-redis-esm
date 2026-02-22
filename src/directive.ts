@@ -4,24 +4,201 @@ import type {
   GraphQLResolveInfo,
   GraphQLSchema,
 } from "graphql";
-import { GraphQLError } from "graphql";
-import type { RateLimiterRedis } from "rate-limiter-flexible";
+import { defaultFieldResolver } from "graphql";
 import {
-  defaultKeyGenerator,
-  type RateLimitDirectiveArgs,
-  type RateLimitDirectiveConfig,
+  createRateLimitedError,
+  createRateLimitKeyError,
+  createRateLimitServiceError,
+  isRateLimitRejection,
+} from "./errors.js";
+import { createDefaultKeyGenerator } from "./key-generators.js";
+import type {
+  RateLimitDirectiveArgs,
+  RateLimitDirectiveConfig,
+  RateLimiterInstance,
+  RateLimitRuntimeLimits,
+  RateLimitServiceErrorMode,
+  SchemaTransformer,
 } from "./types.js";
 
 const DIRECTIVE_NAME = "rateLimit";
-const MAX_LIMITER_CACHE_SIZE = 100; // Prevent unbounded memory growth
+const VALID_SERVICE_ERROR_MODES: readonly RateLimitServiceErrorMode[] = [
+  "failClosed",
+  "failOpen",
+];
+
+/** Maximum allowed duration in seconds (1 year). */
+const DEFAULT_MAX_DURATION_SECONDS = 31_536_000;
+
+/** Maximum allowed request limit per window. */
+const DEFAULT_MAX_LIMIT = 1_000_000;
+
+/** Maximum length of a generated rate limit key. */
+const DEFAULT_MAX_KEY_LENGTH = 512;
+
+/** Maximum allowed number of limiter instances created per schema. */
+const DEFAULT_MAX_LIMITER_CACHE_SIZE = 10_000;
+
+interface ResolvedRuntimeLimits {
+  maxDurationSeconds: number;
+  maxKeyLength: number;
+  maxLimiterCacheSize: number;
+  maxLimit: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
 
 /**
- * Validates rate limit directive arguments
+ * Validates an integer runtime limit value and returns a normalized value.
  */
-function validateDirectiveArgs(args: RateLimitDirectiveArgs): void {
+function resolvePositiveIntegerLimit(
+  value: number | undefined,
+  defaultValue: number,
+  fieldName: keyof RateLimitRuntimeLimits,
+): number {
+  const resolvedValue = value ?? defaultValue;
+
+  if (!Number.isInteger(resolvedValue) || resolvedValue <= 0) {
+    throw new Error(
+      `Invalid runtime limit "${fieldName}": ${resolvedValue}. Must be a positive integer.`,
+    );
+  }
+
+  return resolvedValue;
+}
+
+/**
+ * Resolves and validates runtime limit overrides.
+ */
+function resolveRuntimeLimits(
+  runtimeLimits: RateLimitRuntimeLimits | undefined,
+): ResolvedRuntimeLimits {
+  return {
+    maxDurationSeconds: resolvePositiveIntegerLimit(
+      runtimeLimits?.maxDurationSeconds,
+      DEFAULT_MAX_DURATION_SECONDS,
+      "maxDurationSeconds",
+    ),
+    maxKeyLength: resolvePositiveIntegerLimit(
+      runtimeLimits?.maxKeyLength,
+      DEFAULT_MAX_KEY_LENGTH,
+      "maxKeyLength",
+    ),
+    maxLimiterCacheSize: resolvePositiveIntegerLimit(
+      runtimeLimits?.maxLimiterCacheSize,
+      DEFAULT_MAX_LIMITER_CACHE_SIZE,
+      "maxLimiterCacheSize",
+    ),
+    maxLimit: resolvePositiveIntegerLimit(
+      runtimeLimits?.maxLimit,
+      DEFAULT_MAX_LIMIT,
+      "maxLimit",
+    ),
+  };
+}
+
+/**
+ * Validates and normalizes service error handling mode.
+ */
+function resolveServiceErrorMode(
+  serviceErrorMode: RateLimitServiceErrorMode | undefined,
+): RateLimitServiceErrorMode {
+  switch (serviceErrorMode) {
+    case undefined:
+      return "failClosed";
+    case "failClosed":
+    case "failOpen":
+      return serviceErrorMode;
+    default: {
+      const allowedModes = VALID_SERVICE_ERROR_MODES.join(", ");
+      throw new Error(
+        `Invalid serviceErrorMode: ${String(serviceErrorMode)}. Allowed values: ${allowedModes}.`,
+      );
+    }
+  }
+}
+
+/**
+ * Validates runtime-compatible input from JavaScript consumers.
+ */
+function validateRequiredConfigFields<TContext = unknown>(
+  config: RateLimitDirectiveConfig<TContext>,
+): void {
+  if (!isRecord(config) || Array.isArray(config)) {
+    throw new Error(
+      "Invalid rate limit configuration: config must be an object.",
+    );
+  }
+
+  if (
+    config.keyGenerator !== undefined &&
+    typeof config.keyGenerator !== "function"
+  ) {
+    throw new Error(
+      "Invalid rate limit configuration: keyGenerator must be a function when provided.",
+    );
+  }
+
+  if (typeof config.limiterClass !== "function") {
+    throw new Error(
+      "Invalid rate limit configuration: limiterClass must be a constructor function.",
+    );
+  }
+
+  if (
+    typeof config.limiterOptions !== "object" ||
+    config.limiterOptions === null ||
+    Array.isArray(config.limiterOptions)
+  ) {
+    throw new Error(
+      "Invalid rate limit configuration: limiterOptions must be an object.",
+    );
+  }
+
+  if (config.limiterOptions.storeClient == null) {
+    throw new Error(
+      "Invalid rate limit configuration: limiterOptions.storeClient is required and must not be null or undefined.",
+    );
+  }
+
+  if (
+    config.runtimeLimits !== undefined &&
+    (typeof config.runtimeLimits !== "object" ||
+      config.runtimeLimits === null ||
+      Array.isArray(config.runtimeLimits))
+  ) {
+    throw new Error(
+      "Invalid rate limit configuration: runtimeLimits must be an object when provided.",
+    );
+  }
+}
+
+/**
+ * Validates rate limit directive arguments at schema setup time.
+ *
+ * @param args - Directive arguments to validate
+ * @param runtimeLimits - Runtime safety limits
+ * @throws Error if arguments are out of bounds
+ */
+function validateDirectiveArgs(
+  args: RateLimitDirectiveArgs,
+  runtimeLimits: ResolvedRuntimeLimits,
+): void {
   if (!Number.isInteger(args.limit) || args.limit <= 0) {
     throw new Error(
       `Invalid rate limit: ${args.limit}. Must be a positive integer.`,
+    );
+  }
+
+  if (args.limit > runtimeLimits.maxLimit) {
+    throw new Error(
+      `Invalid limit: ${args.limit}. Maximum allowed is ${runtimeLimits.maxLimit}.`,
     );
   }
 
@@ -31,82 +208,111 @@ function validateDirectiveArgs(args: RateLimitDirectiveArgs): void {
     );
   }
 
-  // Prevent abuse: duration should be reasonable (not more than 1 year)
-  if (args.duration > 31536000) {
+  if (args.duration > runtimeLimits.maxDurationSeconds) {
     throw new Error(
-      `Invalid duration: ${args.duration}. Maximum allowed is 31536000 seconds (1 year).`,
-    );
-  }
-
-  // Prevent abuse: limit should be reasonable
-  if (args.limit > 1000000) {
-    throw new Error(
-      `Invalid limit: ${args.limit}. Maximum allowed is 1000000.`,
+      `Invalid duration: ${args.duration}. Maximum allowed is ${runtimeLimits.maxDurationSeconds} seconds.`,
     );
   }
 }
 
 /**
- * Creates a rate limit directive transformer for GraphQL schemas
+ * Parses directive arguments from `getDirective()` output into a typed object.
  */
-export function createRateLimitDirective<TContext = any>(
-  config: RateLimitDirectiveConfig<TContext>,
-) {
-  const {
-    keyGenerator = defaultKeyGenerator,
-    limiterClass,
-    limiterOptions,
-  } = config;
-
-  // LRU cache of rate limiters per directive configuration
-  // Using Map maintains insertion order for LRU eviction
-  const limiterCache = new Map<string, RateLimiterRedis>();
-
-  /**
-   * Get or create a rate limiter for the given configuration
-   * Implements LRU eviction to prevent unbounded memory growth
-   */
-  function getLimiter(args: RateLimitDirectiveArgs): RateLimiterRedis {
-    // Validate arguments
-    validateDirectiveArgs(args);
-
-    const cacheKey = `${args.duration}:${args.limit}`;
-
-    // Check if limiter exists (and move to end for LRU)
-    if (limiterCache.has(cacheKey)) {
-      const limiter = limiterCache.get(cacheKey)!;
-      // Delete and re-add to move to end (most recently used)
-      limiterCache.delete(cacheKey);
-      limiterCache.set(cacheKey, limiter);
-      return limiter;
-    }
-
-    // Evict oldest entry if cache is full (LRU)
-    if (limiterCache.size >= MAX_LIMITER_CACHE_SIZE) {
-      const oldestKey = limiterCache.keys().next().value;
-      if (oldestKey) {
-        limiterCache.delete(oldestKey);
-      }
-    }
-
-    // Create new limiter
-    const limiter = new limiterClass({
-      duration: args.duration,
-      points: args.limit,
-      ...limiterOptions,
-    });
-    limiterCache.set(cacheKey, limiter);
-
-    return limiter;
+function parseDirectiveArgs(directive: unknown): RateLimitDirectiveArgs {
+  if (!isRecord(directive)) {
+    throw new Error(
+      "Invalid @rateLimit directive arguments: expected an object with numeric limit and duration.",
+    );
   }
 
+  const limit = directive.limit;
+  const duration = directive.duration;
+
+  if (typeof limit !== "number" || typeof duration !== "number") {
+    throw new Error(
+      "Invalid @rateLimit directive arguments: limit and duration must be numbers.",
+    );
+  }
+
+  return { duration, limit };
+}
+
+/**
+ * Validates rate limit key generated by keyGenerator.
+ */
+function validateRateLimitKey(
+  key: unknown,
+  maxKeyLength: number,
+): key is string {
+  return (
+    typeof key === "string" && /\S/.test(key) && key.length <= maxKeyLength
+  );
+}
+
+/**
+ * Validates limiter instances created by limiterClass.
+ */
+function assertLimiterInstance(
+  limiter: unknown,
+  args: RateLimitDirectiveArgs,
+): asserts limiter is RateLimiterInstance {
+  if (!isRecord(limiter) || typeof limiter.consume !== "function") {
+    throw new Error(
+      `Invalid limiter class for @rateLimit(limit: ${args.limit}, duration: ${args.duration}): instances must expose a consume(key) method.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a rate limit directive transformer for GraphQL schemas.
+ *
+ * Limiters are created at schema setup time (during `mapSchema`) and reused
+ * across requests. Fields sharing the same `limit` and `duration` share a
+ * single limiter instance.
+ *
+ * @param config - Rate limit directive configuration
+ * @returns Schema transformer function
+ *
+ * @example
+ * ```typescript
+ * import { RateLimiterRedis } from "rate-limiter-flexible";
+ *
+ * const rateLimitTransformer = createRateLimitDirective({
+ *   limiterClass: RateLimiterRedis,
+ *   limiterOptions: { storeClient: redis },
+ * });
+ * const schema = rateLimitTransformer(baseSchema);
+ * ```
+ */
+export function createRateLimitDirective<TContext = unknown>(
+  config: RateLimitDirectiveConfig<TContext>,
+): SchemaTransformer {
+  validateRequiredConfigFields(config);
+
+  const { limiterClass, limiterOptions } = config;
+  const runtimeLimits = resolveRuntimeLimits(config.runtimeLimits);
+  const serviceErrorMode = resolveServiceErrorMode(config.serviceErrorMode);
+  const keyGenerator =
+    config.keyGenerator ??
+    createDefaultKeyGenerator<TContext>(config.defaultKeyGeneratorOptions);
+
   /**
-   * Schema transformer function
+   * Transforms a GraphQL schema by wrapping fields decorated with
+   * the @rateLimit directive in rate limiting logic.
+   *
+   * Limiter instances are created and cached here at setup time,
+   * not lazily on the first request.
    */
   function rateLimitDirectiveTransformer(schema: GraphQLSchema): GraphQLSchema {
+    const limitersByConfig = new Map<string, RateLimiterInstance>();
+
     return mapSchema(schema, {
       [MapperKind.OBJECT_FIELD]: (
-        fieldConfig: GraphQLFieldConfig<any, TContext>,
+        fieldConfig: GraphQLFieldConfig<unknown, TContext>,
       ) => {
         const directive = getDirective(
           schema,
@@ -118,54 +324,66 @@ export function createRateLimitDirective<TContext = any>(
           return fieldConfig;
         }
 
-        const args = directive as RateLimitDirectiveArgs;
+        const args = parseDirectiveArgs(directive);
+        validateDirectiveArgs(args, runtimeLimits);
+
+        // Create or reuse limiter at setup time
+        const limiterKey = `${args.duration}:${args.limit}`;
+        let limiter = limitersByConfig.get(limiterKey);
+        if (!limiter) {
+          if (limitersByConfig.size >= runtimeLimits.maxLimiterCacheSize) {
+            throw new Error(
+              `Limiter cache size exceeded (${runtimeLimits.maxLimiterCacheSize}). Reduce unique @rateLimit configurations or increase runtimeLimits.maxLimiterCacheSize.`,
+            );
+          }
+
+          const createdLimiter = new limiterClass({
+            ...limiterOptions,
+            duration: args.duration,
+            points: args.limit,
+          });
+          assertLimiterInstance(createdLimiter, args);
+          limiter = createdLimiter;
+          limitersByConfig.set(limiterKey, limiter);
+        }
+
         const { resolve = defaultFieldResolver } = fieldConfig;
 
-        // Wrap resolver with rate limiting
         fieldConfig.resolve = async (
-          source: any,
-          resolverArgs: Record<string, any>,
+          source: unknown,
+          resolverArgs: Record<string, unknown>,
           context: TContext,
           info: GraphQLResolveInfo,
         ) => {
+          const runResolver = () =>
+            resolve(source, resolverArgs, context, info);
+
+          let key: string;
           try {
-            const key = keyGenerator(args, source, resolverArgs, context, info);
-            const limiter = getLimiter(args);
-
-            try {
-              await limiter.consume(key);
-            } catch (rateLimitError: any) {
-              // Check if it's a rate limit error (has msBeforeNext property)
-              if (
-                rateLimitError &&
-                typeof rateLimitError.msBeforeNext === "number"
-              ) {
-                throw new GraphQLError("Rate limit exceeded", {
-                  extensions: {
-                    code: "RATE_LIMITED",
-                    http: { status: 429 },
-                    retryAfter: Math.ceil(rateLimitError.msBeforeNext / 1000),
-                  },
-                });
-              }
-              // Re-throw if it's not a rate limit error (e.g., Redis connection error)
-              throw rateLimitError;
-            }
-
-            return resolve(source, resolverArgs, context, info);
-          } catch (error: any) {
-            // Handle Redis connection errors gracefully
-            if (error.message?.includes("Redis")) {
-              throw new GraphQLError("Rate limiting service unavailable", {
-                extensions: {
-                  code: "RATE_LIMIT_SERVICE_ERROR",
-                  http: { status: 503 },
-                },
-              });
-            }
-            // Re-throw GraphQL errors and other errors
-            throw error;
+            key = await keyGenerator(args, source, resolverArgs, context, info);
+          } catch {
+            throw createRateLimitKeyError();
           }
+
+          if (!validateRateLimitKey(key, runtimeLimits.maxKeyLength)) {
+            throw createRateLimitKeyError();
+          }
+
+          try {
+            await limiter.consume(key);
+          } catch (error: unknown) {
+            if (isRateLimitRejection(error)) {
+              throw createRateLimitedError(error.msBeforeNext);
+            }
+
+            if (serviceErrorMode === "failOpen") {
+              return runResolver();
+            }
+
+            throw createRateLimitServiceError();
+          }
+
+          return runResolver();
         };
 
         return fieldConfig;
@@ -177,22 +395,7 @@ export function createRateLimitDirective<TContext = any>(
 }
 
 /**
- * Default field resolver (same as GraphQL.js default)
- */
-function defaultFieldResolver(
-  source: any,
-  _args: any,
-  _contextValue: any,
-  info: GraphQLResolveInfo,
-) {
-  if (typeof source === "object" && source !== null) {
-    return source[info.fieldName];
-  }
-  return undefined;
-}
-
-/**
- * Type definitions for the rate limit directive
+ * Type definitions for the @rateLimit directive.
  */
 export const rateLimitDirectiveTypeDefs = `
   directive @rateLimit(
