@@ -1,17 +1,17 @@
-name: Publish to npm
+name: Publish
 
 on:
   release:
     types: [published]
-  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     services:
       redis:
         image: redis:7-alpine
@@ -25,31 +25,40 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22.x
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
+          cache: pnpm
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (required for trusted publishing)
+        run: npm install -g npm@latest
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          pnpm --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build package
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Build
         run: pnpm run build
 
-      - name: Run tests
+      - name: Test
         run: pnpm test
         env:
           REDIS_URL: redis://localhost:6379
 
-      - name: Publish to npm
-        run: pnpm publish --access public --no-git-checks
-        env:
-          REDIS_URL: redis://localhost:6379
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish with trusted publishing (OIDC)
+        run: npm publish --access public

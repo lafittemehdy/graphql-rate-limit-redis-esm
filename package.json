@@ -1,79 +1,89 @@
 {
-  "author": "Lafitte Mehdy",
-  "bugs": {
-    "url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/issues"
-  },
-  "description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
-  "devDependencies": {
-    "@biomejs/biome": "2.4.4",
-    "@graphql-tools/schema": "^10.0.31",
-    "@graphql-tools/utils": "^11.0.0",
-    "@types/node": "^25.3.0",
-    "@vitest/coverage-v8": "^4.0.18",
-    "@vitest/ui": "^4.0.18",
-    "graphql": "^16.12.0",
-    "ioredis": "^5.9.3",
-    "rate-limiter-flexible": "^9.1.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
-  },
-  "engines": {
-    "node": ">=22.0.0"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "CHANGELOG.md",
-    "LICENSE",
-    "README.md",
-    "dist"
-  ],
-  "homepage": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm#readme",
-  "keywords": [
-    "directive",
-    "dos-protection",
-    "esm",
-    "graphql",
-    "rate-limit",
-    "redis",
-    "security"
-  ],
-  "license": "MIT",
-  "main": "./dist/index.js",
-  "name": "graphql-rate-limit-redis-esm",
-  "packageManager": "pnpm@10.18.3",
-  "peerDependencies": {
-    "@graphql-tools/utils": "^10.0.0 || ^11.0.0",
-    "graphql": "^16.0.0",
-    "rate-limiter-flexible": "^8.0.0 || ^9.0.0"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm.git"
-  },
-  "scripts": {
-    "benchmark": "pnpm run clean && tsc -p tsconfig.bench.json && node dist/bench.js",
-    "build": "pnpm run clean && tsc",
-    "clean": "node --input-type=module --eval \"import { rm } from 'node:fs/promises'; await rm('dist', { recursive: true, force: true });\"",
-    "dev": "tsc --watch",
-    "lint": "biome check && tsc --noEmit",
-    "lint:fix": "biome check --unsafe --write && tsc --noEmit",
-    "prepublishOnly": "pnpm run lint && pnpm run build && pnpm test",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui",
-    "test:watch": "vitest"
-  },
-  "sideEffects": false,
-  "type": "module",
-  "types": "./dist/index.d.ts",
-  "version": "2.0.0"
+	"name": "graphql-rate-limit-redis-esm",
+	"version": "2.0.1",
+	"description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
+	"author": "Lafitte Mehdy",
+	"license": "MIT",
+	"packageManager": "pnpm@10.18.3",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs",
+			"default": "./dist/index.js"
+		}
+	},
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"LICENSE",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"keywords": [
+		"directive",
+		"dos-protection",
+		"esm",
+		"graphql",
+		"rate-limit",
+		"redis",
+		"security"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm.git"
+	},
+	"bugs": {
+		"url": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/issues"
+	},
+	"homepage": "https://github.com/lafittemehdy/graphql-rate-limit-redis-esm#readme",
+	"sideEffects": false,
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"peerDependencies": {
+		"@graphql-tools/utils": "^10.0.0 || ^11.0.0",
+		"graphql": "^16.0.0 || ^17.0.0",
+		"rate-limiter-flexible": "^8.0.0 || ^9.0.0"
+	},
+	"devDependencies": {
+		"@apollo/server": "^5.4.0",
+		"@biomejs/biome": "^2.4.4",
+		"@graphql-tools/schema": "^10.0.31",
+		"@graphql-tools/utils": "^11.0.0",
+		"@types/node": "^25.3.0",
+		"@vitest/coverage-v8": "^4.0.18",
+		"@vitest/ui": "^4.0.18",
+		"graphql": "^16.12.0",
+		"graphql-yoga": "^5.18.0",
+		"husky": "^9.1.7",
+		"ioredis": "^5.9.3",
+		"rate-limiter-flexible": "^9.1.1",
+		"tsup": "^8.5.1",
+		"tsx": "^4.21.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.0.18"
+	},
+	"scripts": {
+		"benchmark": "tsx src/bench.ts",
+		"build": "tsup",
+		"check:workflow": "node scripts/check-pnpm-setup.mjs",
+		"dev": "tsc --watch",
+		"example:apollo": "tsx examples/servers/apollo-server.ts",
+		"example:yoga": "tsx examples/servers/yoga-server.ts",
+		"lint": "biome check && tsc --noEmit && pnpm run check:workflow",
+		"lint:fix": "biome check --write && tsc --noEmit",
+		"prepare": "husky",
+		"prepublishOnly": "pnpm run lint && pnpm run build && pnpm test",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
+		"test:ui": "vitest --ui",
+		"test:watch": "vitest"
+	}
 }

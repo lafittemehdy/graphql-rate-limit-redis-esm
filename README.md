@@ -1,13 +1,29 @@
 # graphql-rate-limit-redis-esm
 
-[![npm version](https://img.shields.io/npm/v/graphql-rate-limit-redis-esm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
-[![CI](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/test.yml/badge.svg)](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/test.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.0.0-brightgreen)](https://nodejs.org/)
+[![CI](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/ci.yml/badge.svg)](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/ci.yml)
+[![Publish](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/publish.yml/badge.svg)](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/publish.yml)
+[![Pages](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/pages.yml/badge.svg)](https://github.com/lafittemehdy/graphql-rate-limit-redis-esm/actions/workflows/pages.yml)
+[![npm version](https://img.shields.io/npm/v/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
+[![npm downloads](https://img.shields.io/npm/dm/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Provenance](https://img.shields.io/badge/provenance-verified-brightgreen?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 
 Production-ready GraphQL rate limiting directive for Redis with ESM support.
 
-[Live Demo](https://lafittemehdy.github.io/graphql-rate-limit-redis-esm/architecture.html)
+**[Interactive demo](https://lafittemehdy.github.io/graphql-rate-limit-redis-esm/)** — see how rate limiting works with Redis, including request limits, sliding windows, and failure modes.
+
+## Interactive Demo
+
+**[Try it live](https://lafittemehdy.github.io/graphql-rate-limit-redis-esm/)** or run locally:
+
+```bash
+cd examples/visualization
+npm install
+npm run dev
+```
+
+Includes scenario presets (normal flow, burst attack, Redis outage), a request pipeline flow diagram, a bucket gauge, and a response trace log.
 
 ## What it is
 `graphql-rate-limit-redis-esm` is an ESM GraphQL schema transformer that applies a `@rateLimit(limit: Int!, duration: Int!)` directive to field resolvers.
@@ -29,15 +45,22 @@ At runtime, each decorated field calls a limiter instance (`consume(key)`) befor
 ### Requirements
 - Node.js `>=22.0.0` (from `engines`).
 - Peer dependencies:
-  - `graphql` `^16.0.0`
+  - `graphql` `^16.0.0 || ^17.0.0`
   - `@graphql-tools/utils` `^10.0.0 || ^11.0.0`
   - `rate-limiter-flexible` `^8.0.0 || ^9.0.0`
 
 If you use `RateLimiterRedis`, you also need a Redis client (for example `ioredis`) and a reachable Redis server.
 
 ```bash
-pnpm add graphql-rate-limit-redis-esm graphql @graphql-tools/utils @graphql-tools/schema rate-limiter-flexible
-pnpm add ioredis
+npm install graphql-rate-limit-redis-esm graphql @graphql-tools/utils @graphql-tools/schema rate-limiter-flexible ioredis
+```
+
+```bash
+pnpm add graphql-rate-limit-redis-esm graphql @graphql-tools/utils @graphql-tools/schema rate-limiter-flexible ioredis
+```
+
+```bash
+yarn add graphql-rate-limit-redis-esm graphql @graphql-tools/utils @graphql-tools/schema rate-limiter-flexible ioredis
 ```
 
 ## Quickstart
@@ -125,6 +148,8 @@ Notes:
 
 ## Usage
 ### Public exports
+- Constants:
+  - `ERROR_CODES` — frozen object with `RATE_LIMITED`, `RATE_LIMIT_KEY_ERROR`, `RATE_LIMIT_SERVICE_ERROR`
 - Directive:
   - `createRateLimitDirective`
   - `rateLimitDirectiveTypeDefs`
@@ -194,8 +219,7 @@ From `package.json`:
 
 | Script | Command |
 | --- | --- |
-| `pnpm run clean` | Remove `dist/` |
-| `pnpm run build` | Clean + TypeScript build (`tsc`) |
+| `pnpm run build` | `tsup` |
 | `pnpm run dev` | TypeScript watch mode |
 | `pnpm run lint` | Biome check + `tsc --noEmit` |
 | `pnpm run lint:fix` | Biome autofix + `tsc --noEmit` |
@@ -203,18 +227,19 @@ From `package.json`:
 | `pnpm run test:watch` | `vitest` |
 | `pnpm run test:ui` | `vitest --ui` |
 | `pnpm run test:coverage` | `vitest run --coverage` |
-| `pnpm run benchmark` | Clean + build with `tsconfig.bench.json` + run `dist/bench.js` |
+| `pnpm run benchmark` | `tsx src/bench.ts` |
 | `pnpm run prepublishOnly` | Lint + build + test |
 
 ## Architecture
 - `src/index.ts`: public export surface.
+- `src/constants.ts`: `ERROR_CODES` frozen object.
 - `src/directive.ts`: directive SDL, transformer, config validation, limiter instantiation/cache, resolver wrapping.
 - `src/key-generators.ts`: default and factory key generators, key-part normalization, header/context extraction.
 - `src/errors.ts`: GraphQL error factories and retry-after conversion.
 - `src/types.ts`: public TypeScript interfaces and type aliases.
 - `src/bench.ts`: benchmark harness.
 - `src/__tests__/`: unit and Redis-backed integration tests.
-- `examples/visualization/architecture.html`: interactive rate-limiting demo.
+- `examples/visualization/src/`: interactive React rate-limiting demo.
 
 ## Troubleshooting
 - Schema build throws `Invalid rate limit` or `Invalid duration`.
@@ -224,8 +249,8 @@ From `package.json`:
   - Cause: too many unique `(duration, limit)` combinations across decorated fields.
   - Fix: reduce unique combinations or increase `runtimeLimits.maxLimiterCacheSize`.
 - Requests fail with `RATE_LIMIT_KEY_ERROR`.
-  - Cause: key generator threw, returned empty/whitespace, or returned a key longer than `maxKeyLength` (default `512`).
-  - Fix: return a non-empty string key and keep it within length bounds.
+  - Cause: key generator threw, returned empty/whitespace, returned a key with leading/trailing whitespace or control characters, or returned a key longer than `maxKeyLength` (default `512`).
+  - Fix: return a trimmed, non-empty printable string key and keep it within length bounds.
 - Requests fail with `RATE_LIMIT_SERVICE_ERROR`.
   - Cause: limiter backend threw a non-rate-limit error (for example Redis unavailable) and mode is `failClosed`.
   - Fix: restore backend connectivity or set `serviceErrorMode: "failOpen"` if availability-first behavior is acceptable.
@@ -234,7 +259,6 @@ From `package.json`:
   - Fix: enable `trustProxy: true` only behind trusted proxies.
 
 ## Contributing / Development notes
-- Repo package manager is pinned as `pnpm@10.18.3`.
 - Minimum Node version is `22`.
 - Typical local workflow:
   - `pnpm install`
@@ -248,9 +272,9 @@ From `package.json`:
   | Metric | Threshold |
   | --- | --- |
   | Branches | 85% |
-  | Functions | 90% |
-  | Lines | 90% |
-  | Statements | 90% |
+  | Functions | 100% |
+  | Lines | 93% |
+  | Statements | 93% |
 
 ## Code <-> Docs mapping
 | Section / claim | Source files |
@@ -258,12 +282,23 @@ From `package.json`:
 | What the package exports and how consumers import it | `src/index.ts`, `package.json` |
 | Directive signature, transformer behavior, config validation, runtime limit defaults, service error mode | `src/directive.ts`, `src/types.ts` |
 | Default key identity order, proxy behavior, header extraction, key factories | `src/key-generators.ts`, `src/__tests__/key-generators.test.ts` |
-| Error messages/codes/status fields and retry-after calculation | `src/errors.ts`, `src/__tests__/errors.test.ts`, `src/__tests__/directive.test.ts` |
+| Error messages/codes/status fields and retry-after calculation | `src/constants.ts`, `src/errors.ts`, `src/__tests__/errors.test.ts`, `src/__tests__/directive.test.ts` |
 | Node/peer requirements and package metadata | `package.json` |
-| Repository scripts and benchmark execution | `package.json`, `src/bench.ts`, `tsconfig.bench.json` |
-| Benchmark/test environment variables | `src/bench.ts`, `src/__tests__/redis.integration.test.ts`, `.github/workflows/test.yml` |
-| Repository module layout and visualization artifact | `src/index.ts`, `src/directive.ts`, `src/key-generators.ts`, `src/errors.ts`, `src/types.ts`, `src/bench.ts`, `src/__tests__/`, `examples/visualization/architecture.html` |
+| Repository scripts and benchmark execution | `package.json`, `src/bench.ts`, `tsconfig.json` |
+| Benchmark/test environment variables | `src/bench.ts`, `src/__tests__/redis.integration.test.ts`, `.github/workflows/ci.yml` |
+| Repository module layout and visualization artifact | `src/index.ts`, `src/constants.ts`, `src/directive.ts`, `src/key-generators.ts`, `src/errors.ts`, `src/types.ts`, `src/bench.ts`, `src/__tests__/`, `examples/visualization/src/` |
+
+## Related Packages
+
+This package is part of a suite of GraphQL security tools that work independently or together to protect your API:
+
+| Package | Purpose |
+|---|---|
+| [`graphql-query-depth-limit-esm`](https://github.com/lafittemehdy/graphql-query-depth-limit-esm) | Depth limiting — reject deeply nested queries before execution |
+| [`graphql-query-complexity-esm`](https://github.com/lafittemehdy/graphql-query-complexity-esm) | Complexity analysis — assign cost scores to fields and reject expensive queries |
+
+**Recommended layering:** Use depth limiting as a fast, cheap first gate, complexity analysis for fine-grained cost control, and rate limiting for per-client throttling.
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](LICENSE)

@@ -1,40 +1,30 @@
 import type { GraphQLResolveInfo } from "graphql";
-import type {
-  DefaultKeyGeneratorOptions,
-  KeyGenerator,
-  RateLimitDirectiveArgs,
-} from "./types.js";
+import type { DefaultKeyGeneratorOptions, KeyGenerator, RateLimitDirectiveArgs } from "./types.js";
 
 const DEFAULT_IDENTITY = "anonymous";
 const MAX_KEY_PART_LENGTH = 256;
 const TRUST_PROXY_DISABLED_MESSAGE =
-  "Forwarded IP headers are ignored by default. Set trustProxy: true in createDefaultKeyGenerator options if your app runs behind a trusted proxy.";
+	"Forwarded IP headers are ignored by default. Set trustProxy: true in createDefaultKeyGenerator options if your app runs behind a trusted proxy.";
 
 interface ResolvedDefaultKeyGeneratorOptions {
-  anonymousIdentity: string;
-  includeApiKey: boolean;
-  includeIP: boolean;
-  includeUserId: boolean;
-  trustProxy: boolean;
+	anonymousIdentity: string;
+	includeApiKey: boolean;
+	includeIP: boolean;
+	includeUserId: boolean;
+	trustProxy: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+	return typeof value === "object" && value !== null;
 }
 
 /**
  * Validates callback inputs for key generator factories.
  */
-function validateFactoryCallback(
-  value: unknown,
-  factoryName: string,
-  callbackName: string,
-): void {
-  if (typeof value !== "function") {
-    throw new Error(
-      `Invalid ${factoryName} argument: ${callbackName} must be a function.`,
-    );
-  }
+function validateFactoryCallback(value: unknown, factoryName: string, callbackName: string): void {
+	if (typeof value !== "function") {
+		throw new Error(`Invalid ${factoryName} argument: ${callbackName} must be a function.`);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -46,46 +36,46 @@ function validateFactoryCallback(
  * Trims whitespace and enforces a maximum length.
  */
 function normalizeKeyPart(value: unknown): string | null {
-  if (value == null) {
-    return null;
-  }
+	if (value == null) {
+		return null;
+	}
 
-  const normalized = String(value).trim();
-  if (normalized.length === 0) {
-    return null;
-  }
+	const normalized = String(value).trim();
+	if (normalized.length === 0) {
+		return null;
+	}
 
-  return normalized.length > MAX_KEY_PART_LENGTH
-    ? normalized.slice(0, MAX_KEY_PART_LENGTH)
-    : normalized;
+	return normalized.length > MAX_KEY_PART_LENGTH
+		? normalized.slice(0, MAX_KEY_PART_LENGTH)
+		: normalized;
 }
 
 /**
  * Returns the first non-empty normalized value from a candidate list.
  */
 function firstNormalizedValue(values: readonly unknown[]): string | null {
-  for (const value of values) {
-    const normalized = normalizeKeyPart(value);
-    if (normalized) {
-      return normalized;
-    }
-  }
+	for (const value of values) {
+		const normalized = normalizeKeyPart(value);
+		if (normalized) {
+			return normalized;
+		}
+	}
 
-  return null;
+	return null;
 }
 
 /**
  * Normalizes an identity label, falling back to the default identity.
  */
 function normalizeIdentityLabel(label: unknown): string {
-  return normalizeKeyPart(label) ?? DEFAULT_IDENTITY;
+	return normalizeKeyPart(label) ?? DEFAULT_IDENTITY;
 }
 
 /**
  * Appends GraphQL field scope to a key identity prefix.
  */
 function withFieldScope(identity: string, info: GraphQLResolveInfo): string {
-  return `${identity}:${info.parentType.name}.${info.fieldName}`;
+	return `${identity}:${info.parentType.name}.${info.fieldName}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,82 +86,78 @@ function withFieldScope(identity: string, info: GraphQLResolveInfo): string {
  * Safely reads a nested property from an unknown object.
  */
 function readNestedValue(target: unknown, ...path: string[]): unknown {
-  let current: unknown = target;
+	let current: unknown = target;
 
-  for (const segment of path) {
-    if (!isRecord(current)) {
-      return undefined;
-    }
+	for (const segment of path) {
+		if (!isRecord(current)) {
+			return undefined;
+		}
 
-    current = current[segment];
-  }
+		current = current[segment];
+	}
 
-  return current;
+	return current;
 }
 
 /**
  * Reads the first present header value from a set of candidate names.
  */
 function readHeaderValue(headers: unknown, ...headerNames: string[]): unknown {
-  if (headers == null) {
-    return undefined;
-  }
+	if (headers == null) {
+		return undefined;
+	}
 
-  if (typeof Headers !== "undefined" && headers instanceof Headers) {
-    for (const headerName of headerNames) {
-      const value = headers.get(headerName);
-      if (value !== null) {
-        return value;
-      }
-    }
+	if (typeof Headers !== "undefined" && headers instanceof Headers) {
+		for (const headerName of headerNames) {
+			const value = headers.get(headerName);
+			if (value !== null) {
+				return value;
+			}
+		}
 
-    return undefined;
-  }
+		return undefined;
+	}
 
-  if (!isRecord(headers)) {
-    return undefined;
-  }
+	if (!isRecord(headers)) {
+		return undefined;
+	}
 
-  const headerMap = headers;
+	const headerMap = headers;
 
-  // Fast path: exact match (covers Node.js-normalized lowercase headers)
-  for (const headerName of headerNames) {
-    const value = headerMap[headerName];
-    if (value !== undefined) {
-      return value;
-    }
-  }
+	// Fast path: exact match (covers Node.js-normalized lowercase headers)
+	for (const headerName of headerNames) {
+		const value = headerMap[headerName];
+		if (value !== undefined) {
+			return value;
+		}
+	}
 
-  // Slow path: case-insensitive scan for non-normalized header maps
-  const normalizedHeaderNames = new Set(
-    headerNames.map((headerName) => headerName.toLowerCase()),
-  );
+	// Slow path: case-insensitive scan for non-normalized header maps
+	const normalizedHeaderNames = new Set(headerNames.map((headerName) => headerName.toLowerCase()));
 
-  for (const [headerName, headerValue] of Object.entries(headerMap)) {
-    if (normalizedHeaderNames.has(headerName.toLowerCase())) {
-      return headerValue;
-    }
-  }
+	for (const [headerName, headerValue] of Object.entries(headerMap)) {
+		if (normalizedHeaderNames.has(headerName.toLowerCase())) {
+			return headerValue;
+		}
+	}
 
-  return undefined;
+	return undefined;
 }
 
 /**
  * Extracts the first forwarded client IP from headers.
  */
 function getForwardedForIP(headers: unknown): string | null {
-  const rawHeaderValue = readHeaderValue(headers, "x-forwarded-for");
+	const rawHeaderValue = readHeaderValue(headers, "x-forwarded-for");
 
-  const headerValue = Array.isArray(rawHeaderValue)
-    ? rawHeaderValue[0]
-    : rawHeaderValue;
+	const headerValue = Array.isArray(rawHeaderValue) ? rawHeaderValue[0] : rawHeaderValue;
 
-  if (typeof headerValue !== "string") {
-    return null;
-  }
+	if (typeof headerValue !== "string") {
+		return null;
+	}
 
-  const firstIP = headerValue.split(",")[0]?.trim();
-  return firstIP && firstIP.length > 0 ? firstIP : null;
+	const firstIP = headerValue.split(",")[0]?.trim();
+	return firstIP && firstIP.length > 0 ? firstIP : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,58 +168,58 @@ function getForwardedForIP(headers: unknown): string | null {
  * Extracts API key identity from context.
  */
 function getIdentityFromApiKey(context: unknown): string | null {
-  const requestHeaders = readNestedValue(context, "req", "headers");
-  const contextHeaders = readNestedValue(context, "headers");
+	const requestHeaders = readNestedValue(context, "req", "headers");
+	const contextHeaders = readNestedValue(context, "headers");
 
-  const apiKey = firstNormalizedValue([
-    readNestedValue(context, "apiKey"),
-    readHeaderValue(requestHeaders, "x-api-key"),
-    readHeaderValue(contextHeaders, "x-api-key"),
-  ]);
+	const apiKey = firstNormalizedValue([
+		readNestedValue(context, "apiKey"),
+		readHeaderValue(requestHeaders, "x-api-key"),
+		readHeaderValue(contextHeaders, "x-api-key"),
+	]);
 
-  return apiKey ? `apiKey:${apiKey}` : null;
+	return apiKey ? `apiKey:${apiKey}` : null;
 }
 
 /**
  * Extracts IP identity from context.
  */
 function getIdentityFromIP(
-  context: unknown,
-  options: ResolvedDefaultKeyGeneratorOptions,
+	context: unknown,
+	options: ResolvedDefaultKeyGeneratorOptions,
 ): string | null {
-  const requestIP = firstNormalizedValue([
-    readNestedValue(context, "req", "ip"),
-    readNestedValue(context, "ip"),
-  ]);
+	const requestIP = firstNormalizedValue([
+		readNestedValue(context, "req", "ip"),
+		readNestedValue(context, "ip"),
+	]);
 
-  if (requestIP) {
-    return `ip:${requestIP}`;
-  }
+	if (requestIP) {
+		return `ip:${requestIP}`;
+	}
 
-  if (!options.trustProxy) {
-    return null;
-  }
+	if (!options.trustProxy) {
+		return null;
+	}
 
-  const requestHeaders = readNestedValue(context, "req", "headers");
-  const contextHeaders = readNestedValue(context, "headers");
-  const forwardedFor = firstNormalizedValue([
-    getForwardedForIP(requestHeaders),
-    getForwardedForIP(contextHeaders),
-  ]);
+	const requestHeaders = readNestedValue(context, "req", "headers");
+	const contextHeaders = readNestedValue(context, "headers");
+	const forwardedFor = firstNormalizedValue([
+		getForwardedForIP(requestHeaders),
+		getForwardedForIP(contextHeaders),
+	]);
 
-  return forwardedFor ? `ip:${forwardedFor}` : null;
+	return forwardedFor ? `ip:${forwardedFor}` : null;
 }
 
 /**
  * Extracts user identity from context.
  */
 function getIdentityFromUser(context: unknown): string | null {
-  const userId = firstNormalizedValue([
-    readNestedValue(context, "user", "id"),
-    readNestedValue(context, "userId"),
-  ]);
+	const userId = firstNormalizedValue([
+		readNestedValue(context, "user", "id"),
+		readNestedValue(context, "userId"),
+	]);
 
-  return userId ? `user:${userId}` : null;
+	return userId ? `user:${userId}` : null;
 }
 
 /**
@@ -241,31 +227,31 @@ function getIdentityFromUser(context: unknown): string | null {
  * Uses early returns to avoid unnecessary allocation.
  */
 function getDefaultIdentityFromContext(
-  context: unknown,
-  options: ResolvedDefaultKeyGeneratorOptions,
+	context: unknown,
+	options: ResolvedDefaultKeyGeneratorOptions,
 ): string {
-  if (options.includeUserId) {
-    const userId = getIdentityFromUser(context);
-    if (userId) {
-      return userId;
-    }
-  }
+	if (options.includeUserId) {
+		const userId = getIdentityFromUser(context);
+		if (userId) {
+			return userId;
+		}
+	}
 
-  if (options.includeIP) {
-    const ip = getIdentityFromIP(context, options);
-    if (ip) {
-      return ip;
-    }
-  }
+	if (options.includeIP) {
+		const ip = getIdentityFromIP(context, options);
+		if (ip) {
+			return ip;
+		}
+	}
 
-  if (options.includeApiKey) {
-    const apiKey = getIdentityFromApiKey(context);
-    if (apiKey) {
-      return apiKey;
-    }
-  }
+	if (options.includeApiKey) {
+		const apiKey = getIdentityFromApiKey(context);
+		if (apiKey) {
+			return apiKey;
+		}
+	}
 
-  return options.anonymousIdentity;
+	return options.anonymousIdentity;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,86 +261,61 @@ function getDefaultIdentityFromContext(
 /**
  * Validates options passed to createDefaultKeyGenerator.
  */
-function validateDefaultKeyGeneratorOptions(
-  options: DefaultKeyGeneratorOptions | undefined,
-): void {
-  if (options === undefined) {
-    return;
-  }
+function validateDefaultKeyGeneratorOptions(options: DefaultKeyGeneratorOptions | undefined): void {
+	if (options === undefined) {
+		return;
+	}
 
-  if (
-    typeof options !== "object" ||
-    options === null ||
-    Array.isArray(options)
-  ) {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: options must be an object.",
-    );
-  }
+	if (typeof options !== "object" || options === null || Array.isArray(options)) {
+		throw new Error("Invalid createDefaultKeyGenerator options: options must be an object.");
+	}
 
-  const {
-    anonymousIdentity,
-    includeApiKey,
-    includeIP,
-    includeUserId,
-    trustProxy,
-  } = options;
+	const { anonymousIdentity, includeApiKey, includeIP, includeUserId, trustProxy } = options;
 
-  if (
-    anonymousIdentity !== undefined &&
-    typeof anonymousIdentity !== "string"
-  ) {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: anonymousIdentity must be a string.",
-    );
-  }
+	if (anonymousIdentity !== undefined && typeof anonymousIdentity !== "string") {
+		throw new Error(
+			"Invalid createDefaultKeyGenerator options: anonymousIdentity must be a string.",
+		);
+	}
 
-  if (includeApiKey !== undefined && typeof includeApiKey !== "boolean") {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: includeApiKey must be a boolean.",
-    );
-  }
+	if (includeApiKey !== undefined && typeof includeApiKey !== "boolean") {
+		throw new Error("Invalid createDefaultKeyGenerator options: includeApiKey must be a boolean.");
+	}
 
-  if (includeIP !== undefined && typeof includeIP !== "boolean") {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: includeIP must be a boolean.",
-    );
-  }
+	if (includeIP !== undefined && typeof includeIP !== "boolean") {
+		throw new Error("Invalid createDefaultKeyGenerator options: includeIP must be a boolean.");
+	}
 
-  if (includeUserId !== undefined && typeof includeUserId !== "boolean") {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: includeUserId must be a boolean.",
-    );
-  }
+	if (includeUserId !== undefined && typeof includeUserId !== "boolean") {
+		throw new Error("Invalid createDefaultKeyGenerator options: includeUserId must be a boolean.");
+	}
 
-  if (trustProxy !== undefined && typeof trustProxy !== "boolean") {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: trustProxy must be a boolean.",
-    );
-  }
+	if (trustProxy !== undefined && typeof trustProxy !== "boolean") {
+		throw new Error("Invalid createDefaultKeyGenerator options: trustProxy must be a boolean.");
+	}
 
-  if (trustProxy && includeIP === false) {
-    throw new Error(
-      "Invalid createDefaultKeyGenerator options: trustProxy requires includeIP to be enabled.",
-    );
-  }
+	if (trustProxy && includeIP === false) {
+		throw new Error(
+			"Invalid createDefaultKeyGenerator options: trustProxy requires includeIP to be enabled.",
+		);
+	}
 }
 
 /**
  * Resolves and validates default key generator options with defaults applied.
  */
 function resolveDefaultKeyGeneratorOptions(
-  options: DefaultKeyGeneratorOptions | undefined,
+	options: DefaultKeyGeneratorOptions | undefined,
 ): ResolvedDefaultKeyGeneratorOptions {
-  validateDefaultKeyGeneratorOptions(options);
+	validateDefaultKeyGeneratorOptions(options);
 
-  return {
-    anonymousIdentity: normalizeIdentityLabel(options?.anonymousIdentity),
-    includeApiKey: options?.includeApiKey ?? true,
-    includeIP: options?.includeIP ?? true,
-    includeUserId: options?.includeUserId ?? true,
-    trustProxy: options?.trustProxy ?? false,
-  };
+	return {
+		anonymousIdentity: normalizeIdentityLabel(options?.anonymousIdentity),
+		includeApiKey: options?.includeApiKey ?? true,
+		includeIP: options?.includeIP ?? true,
+		includeUserId: options?.includeUserId ?? true,
+		trustProxy: options?.trustProxy ?? false,
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -366,35 +327,31 @@ type CompositeIdentifierEntry = readonly [unknown, unknown];
 /**
  * Returns true when a value is a `[key, value]` tuple.
  */
-function isCompositeIdentifierEntry(
-  value: unknown,
-): value is CompositeIdentifierEntry {
-  return Array.isArray(value) && value.length === 2;
+function isCompositeIdentifierEntry(value: unknown): value is CompositeIdentifierEntry {
+	return Array.isArray(value) && value.length === 2;
 }
 
 /**
  * Resolves composite key callback output into iterable key/value entries.
  */
-function resolveCompositeIdentifierEntries(
-  raw: unknown,
-): ReadonlyArray<CompositeIdentifierEntry> {
-  if (Array.isArray(raw)) {
-    if (raw.some((entry) => !isCompositeIdentifierEntry(entry))) {
-      throw new Error(
-        "Invalid createCompositeKeyGenerator callback result: tuple entries must be [key, value].",
-      );
-    }
+function resolveCompositeIdentifierEntries(raw: unknown): ReadonlyArray<CompositeIdentifierEntry> {
+	if (Array.isArray(raw)) {
+		if (raw.some((entry) => !isCompositeIdentifierEntry(entry))) {
+			throw new Error(
+				"Invalid createCompositeKeyGenerator callback result: tuple entries must be [key, value].",
+			);
+		}
 
-    return raw;
-  }
+		return raw;
+	}
 
-  if (!isRecord(raw)) {
-    throw new Error(
-      "Invalid createCompositeKeyGenerator callback result: getIdentifiers must return an object or an array of tuples.",
-    );
-  }
+	if (!isRecord(raw)) {
+		throw new Error(
+			"Invalid createCompositeKeyGenerator callback result: getIdentifiers must return an object or an array of tuples.",
+		);
+	}
 
-  return Object.entries(raw);
+	return Object.entries(raw);
 }
 
 /**
@@ -424,41 +381,37 @@ function resolveCompositeIdentifierEntries(
  * ```
  */
 export function createCompositeKeyGenerator<TContext = unknown>(
-  getIdentifiers: (
-    context: TContext,
-  ) =>
-    | ReadonlyArray<readonly [string, string | null | undefined]>
-    | Record<string, string | null | undefined>,
+	getIdentifiers: (
+		context: TContext,
+	) =>
+		| ReadonlyArray<readonly [string, string | null | undefined]>
+		| Record<string, string | null | undefined>,
 ): KeyGenerator<TContext> {
-  validateFactoryCallback(
-    getIdentifiers,
-    "createCompositeKeyGenerator",
-    "getIdentifiers",
-  );
+	validateFactoryCallback(getIdentifiers, "createCompositeKeyGenerator", "getIdentifiers");
 
-  return (
-    _directiveArgs: RateLimitDirectiveArgs,
-    _source: unknown,
-    _args: Record<string, unknown>,
-    context: TContext,
-    info: GraphQLResolveInfo,
-  ) => {
-    const entries = resolveCompositeIdentifierEntries(getIdentifiers(context));
-    const identityParts: string[] = [];
+	return (
+		_directiveArgs: RateLimitDirectiveArgs,
+		_source: unknown,
+		_args: Record<string, unknown>,
+		context: TContext,
+		info: GraphQLResolveInfo,
+	) => {
+		const entries = resolveCompositeIdentifierEntries(getIdentifiers(context));
+		const identityParts: string[] = [];
 
-    for (const [key, value] of entries) {
-      const normalizedKey = normalizeKeyPart(key);
-      const normalizedValue = normalizeKeyPart(value);
+		for (const [key, value] of entries) {
+			const normalizedKey = normalizeKeyPart(key);
+			const normalizedValue = normalizeKeyPart(value);
 
-      if (!normalizedKey || !normalizedValue) {
-        continue;
-      }
+			if (!normalizedKey || !normalizedValue) {
+				continue;
+			}
 
-      identityParts.push(`${normalizedKey}:${normalizedValue}`);
-    }
+			identityParts.push(`${normalizedKey}:${normalizedValue}`);
+		}
 
-    return withFieldScope(identityParts.join(":") || DEFAULT_IDENTITY, info);
-  };
+		return withFieldScope(identityParts.join(":") || DEFAULT_IDENTITY, info);
+	};
 }
 
 /**
@@ -480,20 +433,20 @@ export function createCompositeKeyGenerator<TContext = unknown>(
  * ```
  */
 export function createDefaultKeyGenerator<TContext = unknown>(
-  options?: DefaultKeyGeneratorOptions,
+	options?: DefaultKeyGeneratorOptions,
 ): KeyGenerator<TContext> {
-  const resolvedOptions = resolveDefaultKeyGeneratorOptions(options);
+	const resolvedOptions = resolveDefaultKeyGeneratorOptions(options);
 
-  return (
-    _directiveArgs: RateLimitDirectiveArgs,
-    _source: unknown,
-    _args: Record<string, unknown>,
-    context: TContext,
-    info: GraphQLResolveInfo,
-  ) => {
-    const identity = getDefaultIdentityFromContext(context, resolvedOptions);
-    return withFieldScope(identity, info);
-  };
+	return (
+		_directiveArgs: RateLimitDirectiveArgs,
+		_source: unknown,
+		_args: Record<string, unknown>,
+		context: TContext,
+		info: GraphQLResolveInfo,
+	) => {
+		const identity = getDefaultIdentityFromContext(context, resolvedOptions);
+		return withFieldScope(identity, info);
+	};
 }
 
 /**
@@ -510,20 +463,20 @@ export function createDefaultKeyGenerator<TContext = unknown>(
  * ```
  */
 export function createIPKeyGenerator<TContext = unknown>(
-  getIP: (context: TContext) => string | null | undefined,
+	getIP: (context: TContext) => string | null | undefined,
 ): KeyGenerator<TContext> {
-  validateFactoryCallback(getIP, "createIPKeyGenerator", "getIP");
+	validateFactoryCallback(getIP, "createIPKeyGenerator", "getIP");
 
-  return (
-    _directiveArgs: RateLimitDirectiveArgs,
-    _source: unknown,
-    _args: Record<string, unknown>,
-    context: TContext,
-    info: GraphQLResolveInfo,
-  ) => {
-    const ip = normalizeKeyPart(getIP(context)) || "unknown";
-    return withFieldScope(`ip:${ip}`, info);
-  };
+	return (
+		_directiveArgs: RateLimitDirectiveArgs,
+		_source: unknown,
+		_args: Record<string, unknown>,
+		context: TContext,
+		info: GraphQLResolveInfo,
+	) => {
+		const ip = normalizeKeyPart(getIP(context)) || "unknown";
+		return withFieldScope(`ip:${ip}`, info);
+	};
 }
 
 /**
@@ -540,20 +493,20 @@ export function createIPKeyGenerator<TContext = unknown>(
  * ```
  */
 export function createUserKeyGenerator<TContext = unknown>(
-  getUserId: (context: TContext) => string | null | undefined,
+	getUserId: (context: TContext) => string | null | undefined,
 ): KeyGenerator<TContext> {
-  validateFactoryCallback(getUserId, "createUserKeyGenerator", "getUserId");
+	validateFactoryCallback(getUserId, "createUserKeyGenerator", "getUserId");
 
-  return (
-    _directiveArgs: RateLimitDirectiveArgs,
-    _source: unknown,
-    _args: Record<string, unknown>,
-    context: TContext,
-    info: GraphQLResolveInfo,
-  ) => {
-    const userId = normalizeKeyPart(getUserId(context)) || DEFAULT_IDENTITY;
-    return withFieldScope(`user:${userId}`, info);
-  };
+	return (
+		_directiveArgs: RateLimitDirectiveArgs,
+		_source: unknown,
+		_args: Record<string, unknown>,
+		context: TContext,
+		info: GraphQLResolveInfo,
+	) => {
+		const userId = normalizeKeyPart(getUserId(context)) || DEFAULT_IDENTITY;
+		return withFieldScope(`user:${userId}`, info);
+	};
 }
 
 /**

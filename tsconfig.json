@@ -1,16 +1,23 @@
 {
-  "compilerOptions": {
-    "declaration": true,
-    "declarationMap": true,
-    "forceConsistentCasingInFileNames": true,
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "skipLibCheck": true,
-    "strict": true,
-    "target": "ES2024"
-  },
-  "exclude": ["dist", "node_modules", "src/__tests__", "src/bench.ts"],
-  "include": ["src/**/*"]
+	"compilerOptions": {
+		"declaration": true,
+		"declarationMap": true,
+		"forceConsistentCasingInFileNames": true,
+		"isolatedModules": true,
+		"module": "NodeNext",
+		"moduleResolution": "nodenext",
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": true,
+		"noUncheckedSideEffectImports": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"skipLibCheck": true,
+		"strict": true,
+		"target": "ES2022",
+		"verbatimModuleSyntax": true
+	},
+	"exclude": ["**/__tests__", "**/*.test.ts", "dist", "node_modules", "src/bench.ts"],
+	"include": ["src/**/*"]
 }
