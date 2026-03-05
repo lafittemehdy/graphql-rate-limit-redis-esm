@@ -66,7 +66,7 @@ export function FlowDiagram({ lastResult, trigger }: FlowDiagramProps) {
   }, [lastResult, trigger]);
 
   return (
-    <section className="flow-diagram">
+    <section aria-label="Request processing flow" className="flow-diagram">
       {NODES.map((label, i) => (
         <div className="flow-step" key={label}>
           <div
@@ -75,7 +75,11 @@ export function FlowDiagram({ lastResult, trigger }: FlowDiagramProps) {
           >
             {label}
           </div>
-          {i < NODES.length - 1 && <span className="flow-arrow">{"\u2192"}</span>}
+          {i < NODES.length - 1 && (
+            <span aria-hidden="true" className="flow-arrow">
+              {"\u2192"}
+            </span>
+          )}
         </div>
       ))}
     </section>

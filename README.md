@@ -6,12 +6,10 @@
 [![npm version](https://img.shields.io/npm/v/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 [![npm downloads](https://img.shields.io/npm/dm/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Provenance](https://img.shields.io/badge/provenance-verified-brightgreen?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 
 Production-ready GraphQL rate limiting directive for Redis with ESM support.
-
-**[Interactive demo](https://lafittemehdy.github.io/graphql-rate-limit-redis-esm/)** — see how rate limiting works with Redis, including request limits, sliding windows, and failure modes.
 
 ## Interactive Demo
 
@@ -23,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Includes scenario presets (normal flow, burst attack, Redis outage), a request pipeline flow diagram, a bucket gauge, and a response trace log.
+Scenario presets (normal flow, burst attack, Redis outage), a request pipeline flow diagram, a bucket gauge, and a response trace log.
 
 ## What it is
 `graphql-rate-limit-redis-esm` is an ESM GraphQL schema transformer that applies a `@rateLimit(limit: Int!, duration: Int!)` directive to field resolvers.
@@ -43,7 +41,7 @@ At runtime, each decorated field calls a limiter instance (`consume(key)`) befor
 
 ## Installation
 ### Requirements
-- Node.js `>=22.0.0` (from `engines`).
+- Node.js `>=20.0.0` (from `engines`).
 - Peer dependencies:
   - `graphql` `^16.0.0 || ^17.0.0`
   - `@graphql-tools/utils` `^10.0.0 || ^11.0.0`
@@ -241,6 +239,30 @@ From `package.json`:
 - `src/__tests__/`: unit and Redis-backed integration tests.
 - `examples/visualization/src/`: interactive React rate-limiting demo.
 
+## Performance
+
+The directive overhead is measured separately from Redis I/O to isolate the cost of key generation, directive processing, and schema transformation.
+
+The benchmark suite covers 7 scenarios across two categories:
+
+| Category | Scenario | What it measures |
+|---|---|---|
+| **Key generation** | Default (user ID) | Baseline key extraction from context |
+| **Key generation** | Trusted proxy | IP extraction from `x-forwarded-for` headers |
+| **Key generation** | User factory | Custom user-based key generator |
+| **Key generation** | Composite factory | Multi-field key composition |
+| **GraphQL execution** | Baseline (no directive) | Pure GraphQL overhead (reference point) |
+| **GraphQL execution** | Rate limit (default keygen) | Full directive + default key generation |
+| **GraphQL execution** | Rate limit (async keygen) | Full directive + async key generation |
+
+Run benchmarks locally:
+
+```bash
+pnpm run benchmark
+```
+
+Configure via environment variables: `BENCH_ITERATIONS` (default 5000), `BENCH_WARMUP` (default 1000), `BENCH_ROUNDS` (default 3).
+
 ## Troubleshooting
 - Schema build throws `Invalid rate limit` or `Invalid duration`.
   - Cause: directive values are non-positive integers or exceed runtime limits.
@@ -259,7 +281,7 @@ From `package.json`:
   - Fix: enable `trustProxy: true` only behind trusted proxies.
 
 ## Contributing / Development notes
-- Minimum Node version is `22`.
+- Minimum Node version is `20`.
 - Typical local workflow:
   - `pnpm install`
   - `pnpm run lint`

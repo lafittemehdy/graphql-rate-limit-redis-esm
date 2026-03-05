@@ -140,11 +140,11 @@ export function RequestSimulator({
           <label htmlFor={limitInputId}>Limit (requests per window)</label>
           <div className="control-stepper">
             <button
+              aria-label="Decrease limit"
               className="control-stepper-btn"
               onPointerDown={limitDecHold.onPointerDown}
               onPointerLeave={limitDecHold.onPointerLeave}
               onPointerUp={limitDecHold.onPointerUp}
-              title="Decrease limit"
               type="button"
             >
               &minus;
@@ -159,11 +159,11 @@ export function RequestSimulator({
               value={config.limit}
             />
             <button
+              aria-label="Increase limit"
               className="control-stepper-btn"
               onPointerDown={limitIncHold.onPointerDown}
               onPointerLeave={limitIncHold.onPointerLeave}
               onPointerUp={limitIncHold.onPointerUp}
-              title="Increase limit"
               type="button"
             >
               +
@@ -176,11 +176,11 @@ export function RequestSimulator({
           <label htmlFor={durationInputId}>Duration (seconds)</label>
           <div className="control-stepper">
             <button
+              aria-label="Decrease duration"
               className="control-stepper-btn"
               onPointerDown={durationDecHold.onPointerDown}
               onPointerLeave={durationDecHold.onPointerLeave}
               onPointerUp={durationDecHold.onPointerUp}
-              title="Decrease duration"
               type="button"
             >
               &minus;
@@ -196,11 +196,11 @@ export function RequestSimulator({
               value={config.duration}
             />
             <button
+              aria-label="Increase duration"
               className="control-stepper-btn"
               onPointerDown={durationIncHold.onPointerDown}
               onPointerLeave={durationIncHold.onPointerLeave}
               onPointerUp={durationIncHold.onPointerUp}
-              title="Increase duration"
               type="button"
             >
               +
@@ -228,6 +228,7 @@ export function RequestSimulator({
           <div className="control-label">Service Error Mode</div>
           <div className="toggle-group">
             <button
+              aria-pressed={config.serviceErrorMode === "failClosed"}
               className={`toggle-btn${config.serviceErrorMode === "failClosed" ? " active" : ""}`}
               onClick={() => onServiceErrorModeChange("failClosed")}
               type="button"
@@ -235,6 +236,7 @@ export function RequestSimulator({
               failClosed
             </button>
             <button
+              aria-pressed={config.serviceErrorMode === "failOpen"}
               className={`toggle-btn${config.serviceErrorMode === "failOpen" ? " active" : ""}`}
               onClick={() => onServiceErrorModeChange("failOpen")}
               type="button"
@@ -268,10 +270,16 @@ export function RequestSimulator({
         </div>
 
         {/* Action buttons */}
-        <button className={`btn-primary${pulseClass}`} onClick={onSendQuery} type="button">
+        <button
+          aria-keyshortcuts="Space"
+          className={`btn-primary${pulseClass}`}
+          onClick={onSendQuery}
+          type="button"
+        >
           Send Query<kbd>Space</kbd>
         </button>
         <button
+          aria-keyshortcuts="r"
           className={`btn-danger${redisDown ? " active" : ""}`}
           onClick={onToggleRedisDown}
           type="button"

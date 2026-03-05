@@ -1,13 +1,10 @@
 import { GraphQLError } from "graphql";
 import { ERROR_CODES } from "./constants.js";
+import { isRecord } from "./utils.js";
 
 const RATE_LIMITED_MESSAGE = "Rate limit exceeded";
 const RATE_LIMIT_KEY_ERROR_MESSAGE = "Rate limiting key generation failed";
 const RATE_LIMIT_SERVICE_ERROR_MESSAGE = "Rate limiting service unavailable";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
 
 /**
  * Checks whether an error is a rate limit rejection from rate-limiter-flexible.

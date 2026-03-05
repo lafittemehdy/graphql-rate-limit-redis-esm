@@ -1,5 +1,5 @@
 {
-  "name": "graphql-rate-limit-redis-visualization",
+  "name": "graphql-rate-limit-redis-esm-visualization",
   "private": true,
   "type": "module",
   "scripts": {

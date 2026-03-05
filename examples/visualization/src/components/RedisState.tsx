@@ -47,10 +47,13 @@ export function RedisState({
         </>
       )}
 
-      <div className="redis-status">
-        <span className={`status-dot ${redisDown ? "status-error" : "status-ok"}`} />
+      <output aria-live="polite" className="redis-status">
+        <span
+          aria-hidden="true"
+          className={`status-dot ${redisDown ? "status-error" : "status-ok"}`}
+        />
         <span className="redis-status-text">{redisDown ? "Disconnected" : "Connected"}</span>
-      </div>
+      </output>
     </div>
   );
 }

@@ -63,9 +63,14 @@ export function ResponseLog({
   return (
     <section className="panel lab-trace-section">
       <div className="console-header">
-        <span className={`status-dot ${dotClass}`} />
+        <span aria-hidden="true" className={`status-dot ${dotClass}`} />
         <span className="console-title">Response Log</span>
-        <button className="console-toggle" onClick={onClear} title="Clear log (C)" type="button">
+        <button
+          aria-label="Clear response log"
+          className="console-toggle"
+          onClick={onClear}
+          type="button"
+        >
           {"\u2715"}
         </button>
         <div className={`console-nav${traceSteps.length > 0 ? " visible" : ""}`}>
@@ -103,10 +108,20 @@ export function ResponseLog({
             const json = JSON.stringify(step.response, null, 2);
 
             return (
+              // biome-ignore lint/a11y/useSemanticElements: complex expandable panel with nested block content
               <div
+                aria-expanded={isExpanded}
                 className={`lab-trace-step ${step.status}${isCurrent ? " is-current" : ""}${isExpanded ? " expanded" : ""}`}
                 key={`${step.timestamp}:${step.status}:${step.key}:${step.statusCode}`}
                 onClick={() => toggleExpand(i)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleExpand(i);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
               >
                 <span className="step-num">{String(i + 1).padStart(2, "0")}</span>
                 <div className="step-body">

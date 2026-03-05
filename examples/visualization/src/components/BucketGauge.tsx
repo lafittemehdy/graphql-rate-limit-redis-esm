@@ -40,9 +40,18 @@ export function BucketGauge({ limit, used }: BucketGaugeProps) {
 
   return (
     <div className="bucket-container">
-      <div className="bucket">
+      <div
+        aria-label={`Rate limit quota: ${capped} of ${limit} used`}
+        aria-valuemax={limit}
+        aria-valuemin={0}
+        aria-valuenow={capped}
+        className="bucket"
+        role="progressbar"
+      >
         <div className="bucket-fill" style={{ background: fillColor(pct), height: `${pct}%` }} />
-        <div className="bucket-slots">{slots}</div>
+        <div aria-hidden="true" className="bucket-slots">
+          {slots}
+        </div>
       </div>
       <div className="bucket-label">
         <span className="highlight">{capped}</span> / <span className="highlight">{limit}</span>{" "}

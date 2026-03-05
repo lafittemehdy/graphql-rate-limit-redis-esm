@@ -5,6 +5,11 @@
  *   MainGrid: RequestSimulator | CenterPanel | ResponseLog
  *   CenterPanel: BucketGauge + StatusIndicator + CountdownTimer + RedisState
  *
+ * First-visit animation ("The Flood") auto-fires a burst of requests:
+ * the bucket fills slot by slot, the flow diagram lights up with each
+ * request, and when the quota is exhausted the final request is
+ * REJECTED with a dramatic shake.
+ *
  * @module App
  */
 
@@ -18,12 +23,22 @@ import { RedisState } from "./components/RedisState";
 import { RequestSimulator } from "./components/RequestSimulator";
 import { ResponseLog } from "./components/ResponseLog";
 import { ScenarioBar } from "./components/ScenarioBar";
+import { WelcomePrompt } from "./components/WelcomePrompt";
 import { useCountdown } from "./hooks/useCountdown";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useRateLimiter } from "./hooks/useRateLimiter";
 import { runScenario, SCENARIOS } from "./lib/scenarios";
-import { STATUS_INDICATOR } from "./lib/utils";
+import { isIntroDisabled, STATUS_INDICATOR } from "./lib/utils";
 import type { ScenarioId, SimulationResult } from "./types/rate-limit";
+
+const REDUCED_MOTION =
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Intro flood animation config. */
+const INTRO_LIMIT = 5;
+const INTRO_DURATION = 10;
+const INTRO_REQUEST_INTERVAL = 350;
+const INTRO_TOTAL_REQUESTS = INTRO_LIMIT + 2;
 
 /** Root application component. */
 export function App() {
@@ -31,11 +46,17 @@ export function App() {
 
   const [activeScenario, setActiveScenario] = useState<ScenarioId | null>(null);
   const [flowTrigger, setFlowTrigger] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
   const [lastResult, setLastResult] = useState<SimulationResult | null>(null);
   const [sendPulse, setSendPulse] = useState<"error" | "success" | null>(null);
   const [shaking, setShaking] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(!isIntroDisabled());
 
+  const animCancelsRef = useRef<(() => void)[]>([]);
+  const limiterRef = useRef(limiter);
+  limiterRef.current = limiter;
   const scenarioCancelRef = useRef<(() => void) | null>(null);
+  const skippedRef = useRef(false);
 
   /* Cancel pending scenario timers on unmount */
   useEffect(() => {
@@ -80,6 +101,118 @@ export function App() {
       if (result.status === "rejected") setShaking(true);
     }
   }, [limiter]);
+
+  // --- Finish / skip helpers ---
+
+  const finishAnimation = useCallback(() => {
+    for (const cancel of animCancelsRef.current) cancel();
+    animCancelsRef.current = [];
+    setIsAnimating(false);
+  }, []);
+
+  const skipAnimation = useCallback(() => {
+    if (!isAnimating || skippedRef.current) return;
+    skippedRef.current = true;
+    finishAnimation();
+  }, [isAnimating, finishAnimation]);
+
+  // --- The Flood: animation sequence ---
+
+  useEffect(() => {
+    if (!isAnimating) return;
+    skippedRef.current = false;
+
+    const cancels: (() => void)[] = [];
+    animCancelsRef.current = cancels;
+
+    /** Schedule a callback after `ms` (cancellable). */
+    function after(ms: number, fn: () => void): void {
+      const t = setTimeout(() => {
+        if (!skippedRef.current) fn();
+      }, ms);
+      cancels.push(() => clearTimeout(t));
+    }
+
+    // Reduced motion: show final state instantly
+    if (REDUCED_MOTION) {
+      after(300, finishAnimation);
+      return;
+    }
+
+    // Configure the limiter for the intro (use ref to avoid re-trigger)
+    const lim = limiterRef.current;
+    lim.reset();
+    lim.setConfig({ duration: INTRO_DURATION, limit: INTRO_LIMIT });
+    setLastResult(null);
+    setActiveScenario(null);
+
+    let elapsed = 600; // 600ms of stillness
+
+    // Phase 1: The Flood — fire requests one by one
+    for (let i = 0; i < INTRO_TOTAL_REQUESTS; i++) {
+      const requestTime = elapsed;
+      after(requestTime, () => {
+        const result = limiterRef.current.sendQuery();
+        if (result) {
+          setLastResult(result);
+          setFlowTrigger((prev) => prev + 1);
+          setSendPulse(
+            result.status === "rejected" || result.status === "service-error" ? "error" : "success",
+          );
+          if (result.status === "rejected") setShaking(true);
+        }
+      });
+      elapsed += INTRO_REQUEST_INTERVAL;
+    }
+
+    // Phase 2: Hold — let the rejected state sit
+    elapsed += 800;
+
+    // Phase 3: Done
+    after(elapsed, finishAnimation);
+
+    return () => {
+      for (const c of cancels) c();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnimating, finishAnimation]);
+
+  // --- Skip animation on any click or keypress ---
+
+  useEffect(() => {
+    if (!isAnimating) return;
+
+    const handler = () => skipAnimation();
+
+    const t = setTimeout(() => {
+      document.addEventListener("click", handler);
+      document.addEventListener("keydown", handler);
+    }, 200);
+
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", handler);
+      document.removeEventListener("keydown", handler);
+    };
+  }, [isAnimating, skipAnimation]);
+
+  // --- Welcome prompt handlers ---
+
+  const handleWelcomePlay = useCallback(() => {
+    setShowWelcome(false);
+    setIsAnimating(true);
+  }, []);
+
+  const handleWelcomeSkip = useCallback(() => {
+    setShowWelcome(false);
+  }, []);
+
+  const handleReplay = useCallback(() => {
+    if (isAnimating) return;
+    limiter.reset();
+    setLastResult(null);
+    setIsAnimating(true);
+  }, [isAnimating, limiter]);
 
   /* Run a preset scenario */
   const handleScenario = useCallback(
@@ -140,7 +273,8 @@ export function App() {
 
   return (
     <>
-      <Header />
+      {showWelcome && <WelcomePrompt onPlay={handleWelcomePlay} onSkip={handleWelcomeSkip} />}
+      <Header onReplay={handleReplay} />
       <ScenarioBar activeScenario={activeScenario} onSelect={handleScenario} />
       <FlowDiagram lastResult={lastResult} trigger={flowTrigger} />
 

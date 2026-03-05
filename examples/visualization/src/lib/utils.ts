@@ -6,6 +6,17 @@
 
 import type { RequestStatus } from "../types/rate-limit";
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Duration (ms) to show the "Copied!" feedback before resetting. */
+export const COPY_FEEDBACK_MS = 1500;
+
+// ---------------------------------------------------------------------------
+// Status mappings
+// ---------------------------------------------------------------------------
+
 /** Maps a request status to its display icon character. */
 export const STATUS_ICONS: Record<RequestStatus, string> = {
   allowed: "\u2713",
@@ -74,4 +85,28 @@ export function isTextInputElement(el: EventTarget | null): boolean {
 /** Formats a timestamp as a locale time string (HH:MM:SS). */
 export function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString();
+}
+
+// ---------------------------------------------------------------------------
+// Intro state persistence
+// ---------------------------------------------------------------------------
+
+const INTRO_DISABLED_KEY = "grl-intro-disabled";
+
+/** Check whether the user has permanently disabled the intro prompt. */
+export function isIntroDisabled(): boolean {
+  try {
+    return localStorage.getItem(INTRO_DISABLED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Permanently disable the intro prompt on future reloads. */
+export function disableIntro(): void {
+  try {
+    localStorage.setItem(INTRO_DISABLED_KEY, "1");
+  } catch {
+    // Ignore storage errors
+  }
 }

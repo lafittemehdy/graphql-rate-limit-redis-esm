@@ -72,7 +72,7 @@ export const resolvers = {
 export function printBanner(port: number): void {
 	console.log(`
 ┌─────────────────────────────────────────────┐
-│  graphql-rate-limit-redis-esm  —  Example   │
+│  graphql-rate-limit-redis-esm  —  Example    │
 ├─────────────────────────────────────────────┤
 │  Server:   http://localhost:${port}/graphql    │
 │  Redis:    localhost:6379                    │

@@ -14,10 +14,17 @@ interface CountdownTimerProps {
 export function CountdownTimer({ isActive, progress, secondsRemaining }: CountdownTimerProps) {
   return (
     <div className={`countdown-container${isActive ? "" : " hidden"}`}>
-      <div className="countdown-bar-track">
+      <div
+        aria-label={`Window reset progress: ${Math.round(progress * 100)}%`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={Math.round(progress * 100)}
+        className="countdown-bar-track"
+        role="progressbar"
+      >
         <div className="countdown-bar" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className="countdown-text">
+      <div aria-live="polite" className="countdown-text" role="timer">
         Window resets in <span>{secondsRemaining}</span>s
       </div>
     </div>
