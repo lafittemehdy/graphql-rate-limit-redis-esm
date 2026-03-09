@@ -34,7 +34,7 @@ importers:
         version: 16.12.0
       graphql-yoga:
         specifier: ^5.18.0
-        version: 5.18.0(graphql@16.12.0)
+        version: 5.18.1(graphql@16.12.0)
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -894,8 +894,8 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
-  graphql-yoga@5.18.0:
-    resolution: {integrity: sha512-xFt1DVXS1BZ3AvjnawAGc5OYieSe56WuQuyk3iEpBwJ3QDZJWQGLmU9z/L5NUZ+pUcyprsz/bOwkYIV96fXt/g==}
+  graphql-yoga@5.18.1:
+    resolution: {integrity: sha512-GiDSlvibfY/vyurbkBOKMO+adF6bTCzKr80FYWta59s1Lx87oVo8T6Nu/0hrxrGv0SrAUkqUpcpr4Ee7XlYmBw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       graphql: ^15.2.0 || ^16.0.0
@@ -2188,7 +2188,7 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  graphql-yoga@5.18.0(graphql@16.12.0):
+  graphql-yoga@5.18.1(graphql@16.12.0):
     dependencies:
       '@envelop/core': 5.5.1
       '@envelop/instrumentation': 1.0.0
