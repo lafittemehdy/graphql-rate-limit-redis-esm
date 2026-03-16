@@ -42,8 +42,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       rate-limiter-flexible:
-        specifier: ^9.1.1
-        version: 9.1.1
+        specifier: ^10.0.1
+        version: 10.0.1
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)
@@ -1124,8 +1124,8 @@ packages:
     resolution: {integrity: sha512-mAZTtNCeetKMH+pSjrb76NAM8V9a05I9aBZOHztWy/UqcJdQYNsf59vrRKWnojAT9Y+GbIvoTBC++CPHqpDBhQ==}
     engines: {node: '>=0.6'}
 
-  rate-limiter-flexible@9.1.1:
-    resolution: {integrity: sha512-imxFjzPCmvDLMe7d2tsgiSQvs5EI2fI9SNymmslAfOqznZhsZ+PqbIjIYKpuSbd3pKovR1aMG47qfCLIO/adVg==}
+  rate-limiter-flexible@10.0.1:
+    resolution: {integrity: sha512-3G6GMFz5Oz5nVnDv9gQ1LLMdExR4B1lOjogPIjehtgyxPMIkY09BGyk2eCYt36/OkV/0t12GEt6J6HpTl6RzZg==}
 
   raw-body@3.0.2:
     resolution: {integrity: sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==}
@@ -2389,7 +2389,7 @@ snapshots:
     dependencies:
       side-channel: 1.1.0
 
-  rate-limiter-flexible@9.1.1: {}
+  rate-limiter-flexible@10.0.1: {}
 
   raw-body@3.0.2:
     dependencies:
