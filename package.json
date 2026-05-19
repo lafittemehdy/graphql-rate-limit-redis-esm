@@ -58,7 +58,7 @@
 		"@biomejs/biome": "^2.4.15",
 		"@graphql-tools/schema": "^10.0.33",
 		"@graphql-tools/utils": "^11.1.0",
-		"@types/node": "^25.8.0",
+		"@types/node": "^25.9.0",
 		"@vitest/coverage-v8": "^4.1.6",
 		"@vitest/ui": "^4.1.6",
 		"graphql": "^16.14.0",
@@ -67,7 +67,7 @@
 		"ioredis": "^5.10.1",
 		"rate-limiter-flexible": "^11.1.0",
 		"tsup": "^8.5.1",
-		"tsx": "^4.22.0",
+		"tsx": "^4.22.3",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.6"
 	},
