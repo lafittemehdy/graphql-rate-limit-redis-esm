@@ -1,10 +1,10 @@
 {
 	"name": "graphql-rate-limit-redis-esm",
-	"version": "2.0.5",
+	"version": "3.0.0",
 	"description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
 	"author": "Lafitte Mehdy (https://github.com/lafittemehdy)",
 	"license": "MIT",
-	"packageManager": "pnpm@11.1.2",
+	"packageManager": "pnpm@11.1.3",
 	"type": "module",
 	"exports": {
 		".": {
@@ -23,7 +23,7 @@
 		"README.md"
 	],
 	"engines": {
-		"node": ">=20.0.0"
+		"node": ">=22.13.0"
 	},
 	"keywords": [
 		"directive",
@@ -51,14 +51,14 @@
 	"peerDependencies": {
 		"@graphql-tools/utils": "^10.0.0 || ^11.0.0",
 		"graphql": "^16.0.0 || ^17.0.0",
-		"rate-limiter-flexible": "^8.0.0 || ^9.0.0"
+		"rate-limiter-flexible": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0"
 	},
 	"devDependencies": {
 		"@apollo/server": "^5.5.1",
 		"@biomejs/biome": "^2.4.15",
 		"@graphql-tools/schema": "^10.0.33",
 		"@graphql-tools/utils": "^11.1.0",
-		"@types/node": "^25.9.0",
+		"@types/node": "^25.9.1",
 		"@vitest/coverage-v8": "^4.1.6",
 		"@vitest/ui": "^4.1.6",
 		"graphql": "^16.14.0",

@@ -995,6 +995,15 @@ body::after {
   gap: 8px;
 }
 
+.status-text {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .status-indicator.status-allowed .status-text {
   color: var(--success);
 }
@@ -1009,15 +1018,6 @@ body::after {
 
 .status-indicator.status-service-error .status-text {
   color: var(--accent);
-}
-
-.status-text {
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1267,52 +1267,6 @@ body::after {
   }
 }
 
-/* Trace step status variants */
-
-.lab-trace-step.allowed .step-icon {
-  color: var(--success);
-}
-
-.lab-trace-step.allowed .step-state {
-  border-color: color-mix(in srgb, var(--success) 30%, transparent);
-  color: var(--success);
-}
-
-.lab-trace-step.bypassed .step-icon {
-  color: var(--info);
-}
-
-.lab-trace-step.bypassed .step-state {
-  border-color: color-mix(in srgb, var(--info) 30%, transparent);
-  color: var(--info);
-}
-
-.lab-trace-step.rejected .step-fn {
-  color: var(--error);
-}
-
-.lab-trace-step.rejected .step-icon {
-  color: var(--error);
-}
-
-.lab-trace-step.rejected .step-state {
-  border-color: color-mix(in srgb, var(--error) 30%, transparent);
-  color: var(--error);
-}
-
-.lab-trace-step.service-error .step-fn {
-  color: var(--accent);
-}
-
-.lab-trace-step.service-error .step-icon {
-  color: var(--accent);
-}
-
-.lab-trace-step.service-error .step-state {
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--accent);
-}
-
 /* Step child elements */
 
 .step-body {
@@ -1387,6 +1341,52 @@ body::after {
   padding: 0 3px;
   text-transform: uppercase;
   vertical-align: middle;
+}
+
+/* Trace step status variants */
+
+.lab-trace-step.allowed .step-icon {
+  color: var(--success);
+}
+
+.lab-trace-step.allowed .step-state {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  color: var(--success);
+}
+
+.lab-trace-step.bypassed .step-icon {
+  color: var(--info);
+}
+
+.lab-trace-step.bypassed .step-state {
+  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+  color: var(--info);
+}
+
+.lab-trace-step.rejected .step-fn {
+  color: var(--error);
+}
+
+.lab-trace-step.rejected .step-icon {
+  color: var(--error);
+}
+
+.lab-trace-step.rejected .step-state {
+  border-color: color-mix(in srgb, var(--error) 30%, transparent);
+  color: var(--error);
+}
+
+.lab-trace-step.service-error .step-fn {
+  color: var(--accent);
+}
+
+.lab-trace-step.service-error .step-icon {
+  color: var(--accent);
+}
+
+.lab-trace-step.service-error .step-state {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--accent);
 }
 
 /* ---------------------------------------------------------------------------
