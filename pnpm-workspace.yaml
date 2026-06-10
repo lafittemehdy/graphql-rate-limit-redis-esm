@@ -1,5 +1,6 @@
 packages:
   - .
+minimumReleaseAge: 1440
 allowBuilds:
   '@apollo/protobufjs': true
   esbuild: true

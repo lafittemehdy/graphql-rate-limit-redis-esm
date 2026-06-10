@@ -17,6 +17,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 2
+      semver-patch-days: 2
     labels:
       - "dependencies"
     versioning-strategy: "increase"
@@ -31,6 +36,11 @@ updates:
     directory: "/examples/visualization"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 2
+      semver-major-days: 7
+      semver-minor-days: 2
+      semver-patch-days: 2
     labels:
       - "dependencies"
     versioning-strategy: "increase"
