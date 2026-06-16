@@ -1,6 +1,6 @@
 {
 	"name": "graphql-rate-limit-redis-esm",
-	"version": "3.0.1",
+	"version": "3.0.2",
 	"description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
 	"author": "Lafitte Mehdy (https://github.com/lafittemehdy)",
 	"license": "MIT",
