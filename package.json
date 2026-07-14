@@ -58,7 +58,7 @@
 		"@biomejs/biome": "^2.5.3",
 		"@graphql-tools/schema": "^10.0.36",
 		"@graphql-tools/utils": "^11.2.0",
-		"@types/node": "^25.9.3",
+		"@types/node": "^26.1.0",
 		"@vitest/coverage-v8": "^4.1.10",
 		"@vitest/ui": "^4.1.10",
 		"graphql": "^16.14.2",
