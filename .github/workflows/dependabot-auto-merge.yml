@@ -1,38 +1,197 @@
 name: Dependabot Auto-Merge
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+  # The trusted default-branch workflow never checks out or executes PR code and verifies every merge input below.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [CI]
+    types: [completed]
 
 permissions:
+  actions: read # Required to retrieve the tested merge-revision identity from the successful CI run.
   contents: read
-  pull-requests: write
+  pull-requests: read # Required to re-read and validate live PR state before merging.
 
 jobs:
   auto-merge:
-    name: Enable auto-merge for Dependabot PRs
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.draft == false
+    name: Merge verified Dependabot update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: default-branch-writer-${{ github.event.workflow_run.pull_requests[0].base.ref || github.event.repository.default_branch }}
+      queue: max
+    if: >-
+      github.event.workflow_run.name == 'CI' &&
+      github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.id == 49699333 &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].base.ref == github.event.repository.default_branch &&
+      github.event.workflow_run.pull_requests[0].number
 
     steps:
+      - name: Download tested merge-revision identity
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tested-revision-${{ github.event.workflow_run.id }}
+          path: ${{ runner.temp }}/tested-revision
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate verified PR revision
+        id: validation
+        env:
+          EVENT_BASE_REF: ${{ github.event.workflow_run.pull_requests[0].base.ref }}
+          EVENT_BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_PR_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          TESTED_REVISION_PATH: ${{ runner.temp }}/tested-revision/GITHUB_SHA
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          if [ "$EVENT_BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            fail "Dependabot PR targets an unauthorized base branch."
+          fi
+
+          if [ -z "$EVENT_HEAD_SHA" ] || [ "$EVENT_HEAD_SHA" != "$EVENT_PR_HEAD_SHA" ]; then
+            fail "CI run head does not match the PR head recorded by GitHub."
+          fi
+
+          tested_merge_sha="$(tr -d '\r\n' < "$TESTED_REVISION_PATH")"
+          if [[ ! "$tested_merge_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            fail "CI artifact does not contain one canonical Git commit identity."
+          fi
+
+          pr_json="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          live_author="$(jq -r '.user.login' <<<"$pr_json")"
+          live_author_id="$(jq -r '.user.id' <<<"$pr_json")"
+          live_base_ref="$(jq -r '.base.ref' <<<"$pr_json")"
+          live_draft="$(jq -r '.draft' <<<"$pr_json")"
+          live_head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+          live_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+          live_state="$(jq -r '.state' <<<"$pr_json")"
+
+          [ "$live_author" = "dependabot[bot]" ] || fail "PR author is not Dependabot."
+          [ "$live_author_id" = "49699333" ] || fail "PR author identity is not Dependabot."
+          [ "$live_base_ref" = "$EVENT_BASE_REF" ] || fail "PR base branch changed after CI."
+          [ "$live_draft" = "false" ] || fail "Dependabot PR is a draft."
+          [ "$live_head_repo" = "$GITHUB_REPOSITORY" ] || fail "PR head repository is not trusted."
+          [ "$live_head_sha" = "$EVENT_HEAD_SHA" ] || fail "PR head changed after successful CI."
+          [ "$live_state" = "open" ] || fail "Dependabot PR is no longer open."
+
+          current_base_sha="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/${EVENT_BASE_REF}" --jq '.object.sha')"
+          [ "$current_base_sha" = "$EVENT_BASE_SHA" ] || fail "Base branch changed after successful CI; a fresh CI run is required."
+
+          commits_json="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --slurp | jq 'add')"
+          commit_count="$(jq 'length' <<<"$commits_json")"
+          invalid_commit_count="$(
+            jq '[.[] | select(.author.id != 49699333 or .commit.verification.verified != true)] | length' \
+              <<<"$commits_json"
+          )"
+
+          [ "$commit_count" -gt 0 ] || fail "Dependabot PR has no commits."
+          [ "$invalid_commit_count" -eq 0 ] || fail "PR contains an unverified or non-Dependabot commit."
+
+          update_types="$(
+            jq -r '.[].commit.message' <<<"$commits_json" \
+              | sed -n 's/^[[:space:]]*update-type: \(version-update:semver-\(major\|minor\|patch\)\)[[:space:]]*$/\1/p'
+          )"
+
+          [ -n "$update_types" ] || fail "Dependabot update metadata is missing."
+
+          if grep -qx 'version-update:semver-major' <<<"$update_types"; then
+            echo "::notice::Major dependency updates require manual review."
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "eligible=true"
+            echo "head_sha=$live_head_sha"
+            echo "merge_sha=$tested_merge_sha"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check release token
+        if: steps.validation.outputs.eligible == 'true'
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           if [ -z "$RELEASE_TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN must be configured as a Dependabot secret so Dependabot merges can trigger release workflows."
+            echo "::error::RELEASE_TOKEN must be configured as an Actions secret so merges can trigger downstream workflows."
             exit 1
           fi
 
-      - name: Fetch Dependabot metadata
-        id: metadata
-        uses: dependabot/fetch-metadata@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Enable auto-merge for minor and patch updates
-        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
-        run: gh pr merge --auto --squash "$PR_URL"
+      - name: Atomically advance the default branch to the verified merge
+        if: steps.validation.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          BASE_REF: ${{ github.event.workflow_run.pull_requests[0].base.ref }}
+          BASE_SHA: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+          HEAD_SHA: ${{ steps.validation.outputs.head_sha }}
+          TESTED_MERGE_SHA: ${{ steps.validation.outputs.merge_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          repository_directory="$RUNNER_TEMP/verified-merge"
+          git init "$repository_directory"
+          cd "$repository_directory"
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          gh auth setup-git
+
+          git fetch --no-tags origin \
+            "refs/heads/${BASE_REF}:refs/remotes/origin/verified-base" \
+            "refs/pull/${PR_NUMBER}/head:refs/remotes/origin/verified-head" \
+            "refs/pull/${PR_NUMBER}/merge:refs/remotes/origin/verified-merge"
+
+          fetched_base_sha="$(git rev-parse refs/remotes/origin/verified-base)"
+          fetched_head_sha="$(git rev-parse refs/remotes/origin/verified-head)"
+          [ "$fetched_base_sha" = "$BASE_SHA" ] || fail "Base branch changed after successful CI."
+          [ "$fetched_head_sha" = "$HEAD_SHA" ] || fail "PR head changed after successful CI."
+
+          read -r -a merge_identity <<<"$(
+            git rev-list --parents --max-count=1 refs/remotes/origin/verified-merge
+          )"
+          if [ "${#merge_identity[@]}" -ne 3 ]; then
+            fail "GitHub's verified PR merge revision is not a two-parent merge commit."
+          fi
+
+          merge_sha="${merge_identity[0]}"
+          [ "$merge_sha" = "$TESTED_MERGE_SHA" ] || fail "Current PR merge revision is not the exact revision tested by CI."
+          [ "${merge_identity[1]}" = "$BASE_SHA" ] || fail "Merge first parent is not the tested base."
+          [ "${merge_identity[2]}" = "$HEAD_SHA" ] || fail "Merge second parent is not the tested PR head."
+
+          git push --porcelain \
+            --force-with-lease="refs/heads/${BASE_REF}:${BASE_SHA}" \
+            origin \
+            "${merge_sha}:refs/heads/${BASE_REF}"
+
+          merge_recorded=false
+          for attempt in {1..10}; do
+            pr_json="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+            if [ "$(jq --raw-output '.merged' <<<"$pr_json")" = "true" ] && \
+              [ "$(jq --raw-output '.merge_commit_sha' <<<"$pr_json")" = "$merge_sha" ]; then
+              merge_recorded=true
+              break
+            fi
+
+            if [ "$attempt" -lt 10 ]; then
+              sleep 2
+            fi
+          done
+
+          [ "$merge_recorded" = "true" ] || fail "GitHub did not record the atomically pushed merge revision."

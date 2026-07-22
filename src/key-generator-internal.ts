@@ -1,8 +1,15 @@
+/** Provides canonical, bounded identity encoding for the public key-generator factories. */
+
+/// <reference types="node" />
+
+import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import type { GraphQLResolveInfo } from "graphql";
 import { isRecord } from "./utils.js";
 
 export const DEFAULT_IDENTITY = "anonymous";
 export const MAX_KEY_PART_LENGTH = 256;
+const HASHED_KEY_PART_PREFIX = "~sha256:";
 
 type CompositeIdentifierEntry = readonly [unknown, unknown];
 
@@ -21,21 +28,38 @@ export function validateFactoryCallback(
 
 /**
  * Normalizes and bounds a key part for safe inclusion in rate limit keys.
- * Trims whitespace and enforces a maximum length.
+ * Trims whitespace and fingerprints values that cannot fit the bounded literal domain.
  */
 export function normalizeKeyPart(value: unknown): string | null {
 	if (value == null) {
 		return null;
 	}
 
-	const normalized = String(value).trim();
+	if (typeof value !== "string") {
+		throw new Error("Invalid key identity component: expected a string, null, or undefined.");
+	}
+
+	const normalized = value.trim();
 	if (normalized.length === 0) {
 		return null;
 	}
 
-	return normalized.length > MAX_KEY_PART_LENGTH
-		? normalized.slice(0, MAX_KEY_PART_LENGTH)
-		: normalized;
+	if (
+		normalized.length > MAX_KEY_PART_LENGTH ||
+		(normalized.startsWith("~") && normalized.length === MAX_KEY_PART_LENGTH)
+	) {
+		return fingerprintKeyPart(normalized);
+	}
+
+	// Escape the digest domain so a literal short value cannot equal a hashed value.
+	return normalized.startsWith("~") ? `~${normalized}` : normalized;
+}
+
+/** Returns a deterministic, fixed-length fingerprint of a normalized key part. */
+export function fingerprintKeyPart(value: string): string {
+	// UTF-16LE preserves JavaScript code units, including lone surrogates, before hashing.
+	const digest = createHash("sha256").update(value, "utf16le").digest("base64url");
+	return `${HASHED_KEY_PART_PREFIX}${digest}`;
 }
 
 /**
@@ -106,44 +130,109 @@ export function readHeaderValue(headers: unknown, ...headerNames: string[]): unk
 		return undefined;
 	}
 
-	const headerMap = headers;
+	const normalizedHeaderNames = new Set(headerNames.map((headerName) => headerName.toLowerCase()));
+	const matches = Object.entries(headers).filter(([headerName]) =>
+		normalizedHeaderNames.has(headerName.toLowerCase()),
+	);
 
-	// Fast path: exact match (covers Node.js-normalized lowercase headers)
-	for (const headerName of headerNames) {
-		const value = headerMap[headerName];
-		if (value !== undefined) {
-			return value;
-		}
+	// Multiple case variants are an ambiguous wire representation, even when one
+	// happens to use Node's conventional lowercase spelling.
+	return matches.length === 1 ? matches[0]?.[1] : undefined;
+}
+
+/** Returns whether a supported header container contains any candidate field. */
+export function hasHeaderField(headers: unknown, ...headerNames: string[]): boolean {
+	if (headers == null) {
+		return false;
 	}
 
-	// Slow path: case-insensitive scan for non-normalized header maps
-	const normalizedHeaderNames = headerNames.map((headerName) => headerName.toLowerCase());
-
-	for (const [headerName, headerValue] of Object.entries(headerMap)) {
-		const normalizedName = headerName.toLowerCase();
-		for (const candidate of normalizedHeaderNames) {
-			if (candidate === normalizedName) {
-				return headerValue;
+	if (typeof Headers !== "undefined" && headers instanceof Headers) {
+		for (const headerName of headerNames) {
+			if (headers.has(headerName)) {
+				return true;
 			}
 		}
+
+		return false;
 	}
 
-	return undefined;
+	if (!isRecord(headers)) {
+		return false;
+	}
+
+	const normalizedHeaderNames = new Set(headerNames.map((headerName) => headerName.toLowerCase()));
+	for (const headerName of Object.keys(headers)) {
+		if (normalizedHeaderNames.has(headerName.toLowerCase())) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**
- * Extracts the first forwarded client IP from headers.
+ * Reads one unambiguous string header value.
  */
-export function getForwardedForIP(headers: unknown): string | null {
-	const rawHeaderValue = readHeaderValue(headers, "x-forwarded-for");
+export function readSingleHeaderValue(headers: unknown, ...headerNames: string[]): string | null {
+	const rawHeaderValue = readHeaderValue(headers, ...headerNames);
+	if (typeof rawHeaderValue === "string") {
+		return rawHeaderValue;
+	}
 
-	const headerValue = Array.isArray(rawHeaderValue) ? rawHeaderValue[0] : rawHeaderValue;
-	if (typeof headerValue !== "string") {
+	if (
+		Array.isArray(rawHeaderValue) &&
+		rawHeaderValue.length === 1 &&
+		typeof rawHeaderValue[0] === "string"
+	) {
+		return rawHeaderValue[0];
+	}
+
+	return null;
+}
+
+/** Canonicalizes a syntactically valid IPv4 or IPv6 address. */
+export function normalizeIPAddress(value: unknown): string | null {
+	if (typeof value !== "string") {
 		return null;
 	}
 
-	const firstIP = headerValue.split(",")[0]?.trim();
-	return firstIP && firstIP.length > 0 ? firstIP : null;
+	const candidate = value.trim();
+	const family = isIP(candidate);
+	if (family === 0) {
+		return null;
+	}
+
+	if (family === 4) {
+		return candidate;
+	}
+
+	const canonicalIPv6 = new URL(`http://[${candidate}]/`).hostname.slice(1, -1).toLowerCase();
+	const mappedIPv4 = canonicalIPv6.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+	if (!mappedIPv4) {
+		return canonicalIPv6;
+	}
+
+	const high = Number.parseInt(mappedIPv4[1] ?? "", 16);
+	const low = Number.parseInt(mappedIPv4[2] ?? "", 16);
+	return `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+}
+
+/**
+ * Extracts the client IP preceding a configured number of trusted proxy hops.
+ */
+export function getForwardedForIP(headers: unknown, trustedProxyHops = 1): string | null {
+	const headerValue = readSingleHeaderValue(headers, "x-forwarded-for");
+	if (!headerValue || !Number.isInteger(trustedProxyHops) || trustedProxyHops <= 0) {
+		return null;
+	}
+
+	const forwardedChain = headerValue.split(",");
+	const clientIndex = forwardedChain.length - trustedProxyHops;
+	if (clientIndex < 0) {
+		return null;
+	}
+
+	return normalizeIPAddress(forwardedChain[clientIndex]);
 }
 
 /**

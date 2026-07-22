@@ -6,24 +6,34 @@
  * Run:  pnpm example:yoga
  */
 
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { makeExecutableSchema } from "@graphql-tools/schema";
 import { createYoga } from "graphql-yoga";
-import Redis from "ioredis";
 import { RateLimiterRedis } from "rate-limiter-flexible";
 import { createRateLimitDirective } from "../../src/index.js";
+import { createExampleRedisClient } from "./redis.js";
 import { printBanner, resolvers, typeDefs } from "./schema.js";
 
-const redis = new Redis("redis://localhost:6379");
+interface NodeServerContext {
+	req: IncomingMessage;
+}
 
-const rateLimitTransformer = createRateLimitDirective({
+const redis = createExampleRedisClient();
+await redis.connect();
+await redis.ping();
+
+const rateLimitTransformer = createRateLimitDirective<NodeServerContext>({
 	limiterClass: RateLimiterRedis,
-	limiterOptions: { storeClient: redis },
+	limiterOptions: {
+		keyPrefix: "graphql-rate-limit-example",
+		rejectIfRedisNotReady: true,
+		storeClient: redis,
+	},
 });
 
 const schema = rateLimitTransformer(makeExecutableSchema({ resolvers, typeDefs }));
 
-const yoga = createYoga({ schema });
+const yoga = createYoga<NodeServerContext>({ schema });
 
 const PORT = 4000;
 const server = createServer(yoga);

@@ -10,8 +10,14 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import { generateKey, simulateRequest } from "../lib/simulation-engine";
-import type { ErrorMode, Identity, RateLimitConfig, SimulationResult } from "../types/rate-limit";
+import { generateKey, getOrCreateLimiterState, simulateRequest } from "../lib/simulation-engine";
+import type {
+  ErrorMode,
+  Identity,
+  LimiterState,
+  RateLimitConfig,
+  SimulationResult,
+} from "../types/rate-limit";
 
 const DEFAULT_CONFIG: RateLimitConfig = {
   duration: 60,
@@ -52,35 +58,35 @@ export function useRateLimiter(): RateLimiterAPI {
   const [windowEnd, setWindowEnd] = useState(0);
   const [windowStarted, setWindowStarted] = useState(false);
 
-  /* Mutable refs for synchronous reads inside simulateRequest */
-  const limiterRef = useRef({
-    consumed: 0,
-    redisDown: false,
-    windowEnd: 0,
-    windowStarted: false,
-  });
-
   const configRef = useRef(config);
+  const limiterStatesRef = useRef(new Map<string, LimiterState>());
+  const redisDownRef = useRef(false);
   const sendingRef = useRef(false);
 
   /* Keep refs in sync with state */
   configRef.current = config;
 
-  const syncLimiterState = useCallback(() => {
-    const l = limiterRef.current;
-    setConsumed(l.consumed);
-    setRedisDown(l.redisDown);
-    setWindowEnd(l.windowEnd);
-    setWindowStarted(l.windowStarted);
+  const syncLimiterState = useCallback((selectedConfig = configRef.current) => {
+    const limiter = getOrCreateLimiterState(
+      selectedConfig,
+      limiterStatesRef.current,
+      redisDownRef.current,
+    );
+    setConsumed(limiter.consumed);
+    setRedisDown(redisDownRef.current);
+    setWindowEnd(limiter.windowEnd);
+    setWindowStarted(limiter.windowStarted);
   }, []);
 
-  const setConfig = useCallback((patch: Partial<RateLimitConfig>) => {
-    setConfigState((prev) => {
-      const next = { ...prev, ...patch };
+  const setConfig = useCallback(
+    (patch: Partial<RateLimitConfig>) => {
+      const next = { ...configRef.current, ...patch };
       configRef.current = next;
-      return next;
-    });
-  }, []);
+      setConfigState(next);
+      syncLimiterState(next);
+    },
+    [syncLimiterState],
+  );
 
   const setDuration = useCallback((duration: number) => setConfig({ duration }), [setConfig]);
 
@@ -94,7 +100,7 @@ export function useRateLimiter(): RateLimiterAPI {
   );
 
   const toggleRedisDown = useCallback(() => {
-    limiterRef.current.redisDown = !limiterRef.current.redisDown;
+    redisDownRef.current = !redisDownRef.current;
     syncLimiterState();
   }, [syncLimiterState]);
 
@@ -112,12 +118,8 @@ export function useRateLimiter(): RateLimiterAPI {
   }, []);
 
   const reset = useCallback(() => {
-    limiterRef.current = {
-      consumed: 0,
-      redisDown: false,
-      windowEnd: 0,
-      windowStarted: false,
-    };
+    limiterStatesRef.current.clear();
+    redisDownRef.current = false;
     syncLimiterState();
     clearLog();
   }, [clearLog, syncLimiterState]);
@@ -126,7 +128,12 @@ export function useRateLimiter(): RateLimiterAPI {
     if (sendingRef.current) return null;
     sendingRef.current = true;
 
-    const result = simulateRequest(configRef.current, limiterRef.current);
+    const limiter = getOrCreateLimiterState(
+      configRef.current,
+      limiterStatesRef.current,
+      redisDownRef.current,
+    );
+    const result = simulateRequest(configRef.current, limiter);
     syncLimiterState();
 
     setTraceSteps((prev) => {
@@ -142,7 +149,7 @@ export function useRateLimiter(): RateLimiterAPI {
     return result;
   }, [syncLimiterState]);
 
-  const generatedKey = generateKey(config.identity);
+  const generatedKey = generateKey(config);
 
   return {
     clearLog,

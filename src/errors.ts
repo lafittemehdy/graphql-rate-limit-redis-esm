@@ -1,3 +1,5 @@
+/** Classifies limiter failures and constructs stable public GraphQL errors. */
+
 import { GraphQLError } from "graphql";
 import { ERROR_CODES } from "./constants.js";
 import { isRecord } from "./utils.js";
@@ -11,12 +13,12 @@ const RATE_LIMIT_SERVICE_ERROR_MESSAGE = "Rate limiting service unavailable";
  * Rate limit rejections have a numeric `msBeforeNext` property.
  */
 export function isRateLimitRejection(error: unknown): error is { msBeforeNext: number } {
-	if (!isRecord(error)) {
+	if (!isRecord(error) || Array.isArray(error)) {
 		return false;
 	}
 
 	const msBeforeNext = error.msBeforeNext;
-	return typeof msBeforeNext === "number" && !Number.isNaN(msBeforeNext);
+	return typeof msBeforeNext === "number" && Number.isFinite(msBeforeNext) && msBeforeNext >= 0;
 }
 
 /**

@@ -2,21 +2,100 @@ name: CI
 
 on:
   pull_request:
-    branches: [master, main]
+    branches: [master]
   push:
-    branches: [master, main]
+    branches: [master]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  tested_revision:
+    name: Record tested revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Record immutable event revision
+        run: printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/GITHUB_SHA"
+
+      - name: Upload tested revision identity
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tested-revision-${{ github.run_id }}
+          path: ${{ runner.temp }}/GITHUB_SHA
+          if-no-files-found: error
+          retention-days: 1
+
+  quality:
+    name: Quality and package verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release-quality verification
+        run: pnpm run verify
+
+  visualization:
+    name: Visualization build and audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: examples/visualization/package-lock.json
+
+      - name: Install visualization dependencies
+        working-directory: examples/visualization
+        run: npm ci
+
+      - name: Build visualization
+        working-directory: examples/visualization
+        run: npm run build
+
+      - name: Audit visualization production and build dependencies
+        working-directory: examples/visualization
+        run: npm audit --audit-level=high
+
   test:
     name: Test on Node.js ${{ matrix.node-version }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -28,29 +107,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22.x, 24.x, 26.x]
+        node-version: [22.13.0, 22.x, 24.x, 26.x]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Run linter
-        run: pnpm run lint
-
-      - name: Build package
-        run: pnpm run build
 
       - name: Run tests
         run: pnpm test
@@ -59,20 +134,23 @@ jobs:
 
   benchmark:
     name: Benchmark
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.x
+          node-version: 24.x
           cache: pnpm
 
       - name: Install dependencies
@@ -81,46 +159,31 @@ jobs:
       - name: Run benchmarks
         run: pnpm run benchmark
 
-  build-check:
-    name: Build verification
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.x
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build package
-        run: pnpm run build
-
-      - name: Check TypeScript compilation
-        run: pnpm exec tsc --noEmit
-
-      - name: Verify package can be packed
-        run: pnpm pack
-
   ci-success:
     name: CI Success
-    runs-on: ubuntu-latest
-    needs: [test, benchmark, build-check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    needs: [tested_revision, quality, visualization, test, benchmark]
     if: always()
     steps:
       - name: Verify required jobs
+        env:
+          BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TESTED_REVISION_RESULT: ${{ needs.tested_revision.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          VISUALIZATION_RESULT: ${{ needs.visualization.result }}
         run: |
-          for result in "${{ needs.test.result }}" "${{ needs.benchmark.result }}" "${{ needs.build-check.result }}"; do
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
-              echo "CI did not pass."
-              exit 1
-            fi
-          done
+          if [ "$QUALITY_RESULT" != "success" ] || \
+            [ "$TEST_RESULT" != "success" ] || \
+            [ "$TESTED_REVISION_RESULT" != "success" ] || \
+            [ "$VISUALIZATION_RESULT" != "success" ]; then
+            echo "::error::Required CI jobs did not pass."
+            exit 1
+          fi
+
+          if [ "$BENCHMARK_RESULT" != "success" ] && [ "$BENCHMARK_RESULT" != "skipped" ]; then
+            echo "::error::Benchmark did not pass."
+            exit 1
+          fi

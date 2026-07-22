@@ -1,3 +1,5 @@
+/** Configures deterministic unit, integration, and coverage execution for the library. */
+
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({

@@ -1,3 +1,5 @@
+/** Supplies schema, execution, and limiter test doubles for directive specifications. */
+
 import { makeExecutableSchema } from "@graphql-tools/schema";
 import type { GraphQLResolveInfo, GraphQLSchema } from "graphql";
 import { execute, parse } from "graphql";
@@ -39,6 +41,23 @@ export function createCountingMockLimiterClass(consumeSpy: ReturnType<typeof vi.
 
 	return {
 		getCount: () => count,
+		MockClass,
+	};
+}
+
+/** Creates a limiter class that records the fully resolved constructor options. */
+export function createOptionsCapturingMockLimiterClass(consumeSpy: ReturnType<typeof vi.fn>) {
+	const capturedOptions: Record<string, unknown>[] = [];
+
+	const MockClass = class {
+		consume = consumeSpy;
+		constructor(options: Record<string, unknown>) {
+			capturedOptions.push(options);
+		}
+	};
+
+	return {
+		capturedOptions,
 		MockClass,
 	};
 }

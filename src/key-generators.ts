@@ -1,12 +1,16 @@
+/** Implements deterministic identity extraction and rate-limit key-generator factories. */
+
 import type { GraphQLResolveInfo } from "graphql";
 import {
-	DEFAULT_IDENTITY,
+	fingerprintKeyPart,
 	firstNormalizedValue,
 	getForwardedForIP,
+	hasHeaderField,
 	normalizeIdentityLabel,
+	normalizeIPAddress,
 	normalizeKeyPart,
-	readHeaderValue,
 	readNestedValue,
+	readSingleHeaderValue,
 	resolveCompositeIdentifierEntries,
 	validateFactoryCallback,
 	withFieldScope,
@@ -14,7 +18,7 @@ import {
 import type { DefaultKeyGeneratorOptions, KeyGenerator, RateLimitDirectiveArgs } from "./types.js";
 
 const TRUST_PROXY_DISABLED_MESSAGE =
-	"Forwarded IP headers are ignored by default. Set trustProxy: true in createDefaultKeyGenerator options if your app runs behind a trusted proxy.";
+	"Forwarded IP headers are ignored by default. Behind trusted proxies, set trustProxy: true and configure trustedProxyHops for the verified proxy chain.";
 
 interface ResolvedDefaultKeyGeneratorOptions {
 	anonymousIdentity: string;
@@ -22,11 +26,30 @@ interface ResolvedDefaultKeyGeneratorOptions {
 	includeIP: boolean;
 	includeUserId: boolean;
 	trustProxy: boolean;
+	trustedProxyHops: number;
 }
 
 // ---------------------------------------------------------------------------
 // Identity extraction
 // ---------------------------------------------------------------------------
+
+/** Rejects HTTP list syntax because x-api-key is a scalar credential field. */
+function readApiKeyHeader(headers: unknown): string | null {
+	const value = readSingleHeaderValue(headers, "x-api-key");
+	if (value === null) {
+		if (hasHeaderField(headers, "x-api-key")) {
+			throw new Error("Invalid API key identity: x-api-key must contain one scalar value.");
+		}
+
+		return null;
+	}
+
+	if (value.includes(",") || value.trim().length === 0) {
+		throw new Error("Invalid API key identity: x-api-key must contain one non-empty scalar value.");
+	}
+
+	return value;
+}
 
 /**
  * Extracts API key identity from context.
@@ -34,14 +57,24 @@ interface ResolvedDefaultKeyGeneratorOptions {
 function getIdentityFromApiKey(context: unknown): string | null {
 	const requestHeaders = readNestedValue(context, "req", "headers");
 	const contextHeaders = readNestedValue(context, "headers");
+	const fetchRequestHeaders = readNestedValue(context, "request", "headers");
+	const contextApiKey = readNestedValue(context, "apiKey");
+	if (contextApiKey != null && typeof contextApiKey !== "string") {
+		throw new Error("Invalid API key identity: context.apiKey must be a string when present.");
+	}
+
+	if (typeof contextApiKey === "string" && contextApiKey.trim().length === 0) {
+		throw new Error("Invalid API key identity: context.apiKey must be non-empty when present.");
+	}
 
 	const apiKey = firstNormalizedValue([
-		readNestedValue(context, "apiKey"),
-		readHeaderValue(requestHeaders, "x-api-key"),
-		readHeaderValue(contextHeaders, "x-api-key"),
+		contextApiKey,
+		readApiKeyHeader(requestHeaders),
+		readApiKeyHeader(contextHeaders),
+		readApiKeyHeader(fetchRequestHeaders),
 	]);
 
-	return apiKey ? `apiKey:${apiKey}` : null;
+	return apiKey ? `apiKey:${fingerprintKeyPart(apiKey)}` : null;
 }
 
 /**
@@ -51,27 +84,31 @@ function getIdentityFromIP(
 	context: unknown,
 	options: ResolvedDefaultKeyGeneratorOptions,
 ): string | null {
-	const requestIP = firstNormalizedValue([
-		readNestedValue(context, "req", "ip"),
-		readNestedValue(context, "ip"),
+	const directIPAddress = firstNormalizedValue([
+		normalizeIPAddress(readNestedValue(context, "req", "socket", "remoteAddress")),
+		normalizeIPAddress(readNestedValue(context, "raw", "socket", "remoteAddress")),
 	]);
 
-	if (requestIP) {
-		return `ip:${requestIP}`;
-	}
-
 	if (!options.trustProxy) {
-		return null;
+		return directIPAddress ? `ip:${directIPAddress}` : null;
 	}
 
 	const requestHeaders = readNestedValue(context, "req", "headers");
 	const contextHeaders = readNestedValue(context, "headers");
+	const fetchRequestHeaders = readNestedValue(context, "request", "headers");
 	const forwardedFor = firstNormalizedValue([
-		getForwardedForIP(requestHeaders),
-		getForwardedForIP(contextHeaders),
+		getForwardedForIP(requestHeaders, options.trustedProxyHops),
+		getForwardedForIP(contextHeaders, options.trustedProxyHops),
+		getForwardedForIP(fetchRequestHeaders, options.trustedProxyHops),
 	]);
 
-	return forwardedFor ? `ip:${forwardedFor}` : null;
+	if (forwardedFor) {
+		return `ip:${forwardedFor}`;
+	}
+
+	// Framework-level IP fields may themselves be derived from the rejected
+	// forwarding header. Fall back only to the independently observed peer.
+	return directIPAddress ? `ip:${directIPAddress}` : null;
 }
 
 /**
@@ -115,7 +152,7 @@ function getDefaultIdentityFromContext(
 		}
 	}
 
-	return options.anonymousIdentity;
+	return `anonymous:${options.anonymousIdentity}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +171,14 @@ function validateDefaultKeyGeneratorOptions(options: DefaultKeyGeneratorOptions 
 		throw new Error("Invalid createDefaultKeyGenerator options: options must be an object.");
 	}
 
-	const { anonymousIdentity, includeApiKey, includeIP, includeUserId, trustProxy } = options;
+	const {
+		anonymousIdentity,
+		includeApiKey,
+		includeIP,
+		includeUserId,
+		trustedProxyHops,
+		trustProxy,
+	} = options;
 
 	if (anonymousIdentity !== undefined && typeof anonymousIdentity !== "string") {
 		throw new Error(
@@ -158,9 +202,24 @@ function validateDefaultKeyGeneratorOptions(options: DefaultKeyGeneratorOptions 
 		throw new Error("Invalid createDefaultKeyGenerator options: trustProxy must be a boolean.");
 	}
 
+	if (
+		trustedProxyHops !== undefined &&
+		(!Number.isInteger(trustedProxyHops) || trustedProxyHops <= 0)
+	) {
+		throw new Error(
+			"Invalid createDefaultKeyGenerator options: trustedProxyHops must be a positive integer.",
+		);
+	}
+
 	if (trustProxy && includeIP === false) {
 		throw new Error(
 			"Invalid createDefaultKeyGenerator options: trustProxy requires includeIP to be enabled.",
+		);
+	}
+
+	if (trustedProxyHops !== undefined && !trustProxy) {
+		throw new Error(
+			"Invalid createDefaultKeyGenerator options: trustedProxyHops requires trustProxy to be enabled.",
 		);
 	}
 }
@@ -179,6 +238,7 @@ function resolveDefaultKeyGeneratorOptions(
 		includeIP: options?.includeIP ?? true,
 		includeUserId: options?.includeUserId ?? true,
 		trustProxy: options?.trustProxy ?? false,
+		trustedProxyHops: options?.trustedProxyHops ?? 1,
 	};
 }
 
@@ -229,7 +289,7 @@ export function createCompositeKeyGenerator<TContext = unknown>(
 		info: GraphQLResolveInfo,
 	) => {
 		const entries = resolveCompositeIdentifierEntries(getIdentifiers(context));
-		const identityParts: string[] = [];
+		const identityParts: Array<readonly [string, string]> = [];
 
 		for (const [key, value] of entries) {
 			const normalizedKey = normalizeKeyPart(key);
@@ -239,10 +299,17 @@ export function createCompositeKeyGenerator<TContext = unknown>(
 				continue;
 			}
 
-			identityParts.push(`${normalizedKey}:${normalizedValue}`);
+			identityParts.push([normalizedKey, normalizedValue]);
 		}
 
-		return withFieldScope(identityParts.join(":") || DEFAULT_IDENTITY, info);
+		if (identityParts.length === 0) {
+			return withFieldScope(`composite:${fingerprintKeyPart("[]")}`, info);
+		}
+
+		// JSON array serialization is unambiguous over normalized ordered tuples; the
+		// collision-resistant fingerprint hides and bounds their Redis representation.
+		const serializedIdentity = JSON.stringify(identityParts);
+		return withFieldScope(`composite:${fingerprintKeyPart(serializedIdentity)}`, info);
 	};
 }
 
@@ -306,8 +373,8 @@ export function createIPKeyGenerator<TContext = unknown>(
 		context: TContext,
 		info: GraphQLResolveInfo,
 	) => {
-		const ip = normalizeKeyPart(getIP(context)) || "unknown";
-		return withFieldScope(`ip:${ip}`, info);
+		const ip = normalizeKeyPart(getIP(context));
+		return withFieldScope(ip ? `ip:${ip}` : "anonymous:ip", info);
 	};
 }
 
@@ -336,8 +403,8 @@ export function createUserKeyGenerator<TContext = unknown>(
 		context: TContext,
 		info: GraphQLResolveInfo,
 	) => {
-		const userId = normalizeKeyPart(getUserId(context)) || DEFAULT_IDENTITY;
-		return withFieldScope(`user:${userId}`, info);
+		const userId = normalizeKeyPart(getUserId(context));
+		return withFieldScope(userId ? `user:${userId}` : "anonymous:user", info);
 	};
 }
 

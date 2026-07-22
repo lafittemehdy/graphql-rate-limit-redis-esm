@@ -1,3 +1,5 @@
+/** Mounts the visualization application into its browser document root. */
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";

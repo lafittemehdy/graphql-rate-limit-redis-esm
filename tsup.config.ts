@@ -1,3 +1,5 @@
+/** Builds the package's dual ESM/CommonJS runtime and declaration artifacts. */
+
 import { defineConfig } from "tsup";
 
 export default defineConfig({

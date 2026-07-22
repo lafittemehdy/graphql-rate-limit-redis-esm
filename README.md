@@ -32,7 +32,7 @@ At runtime, each decorated field calls a limiter instance (`consume(key)`) befor
 - GraphQL directive SDL export: `rateLimitDirectiveTypeDefs`.
 - Directive transformer factory: `createRateLimitDirective(config)`.
 - Schema-time validation of directive arguments and runtime limits.
-- Limiter instance reuse per unique `(duration, limit)` pair, with a configurable cache-size ceiling.
+- Limiter instance reuse per unique `(limit, duration)` pair, with a configurable cache-size ceiling.
 - Custom key generator support (sync or async).
 - Built-in key generator helpers: default, user, IP, and composite.
 - Service failure modes: `failClosed` (default) or `failOpen`.
@@ -40,12 +40,14 @@ At runtime, each decorated field calls a limiter instance (`consume(key)`) befor
 - ESM package output with exported TypeScript types.
 
 ## Installation
+
 ### Requirements
+
 - Node.js `>=22.13.0` (from `engines`).
 - Peer dependencies:
   - `graphql` `^16.0.0 || ^17.0.0`
   - `@graphql-tools/utils` `^10.0.0 || ^11.0.0`
-  - `rate-limiter-flexible` `^8.0.0 || ^9.0.0`
+  - `rate-limiter-flexible` `^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0`
 
 If you use `RateLimiterRedis`, you also need a Redis client (for example `ioredis`) and a reachable Redis server.
 
@@ -62,20 +64,33 @@ yarn add graphql-rate-limit-redis-esm graphql @graphql-tools/utils @graphql-tool
 ```
 
 ## Quickstart
+
 ```ts
 import { makeExecutableSchema } from "@graphql-tools/schema";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { RateLimiterRedis } from "rate-limiter-flexible";
 import {
   createRateLimitDirective,
   rateLimitDirectiveTypeDefs,
 } from "graphql-rate-limit-redis-esm";
 
-const redis = new Redis("redis://localhost:6379");
+const redis = new Redis("redis://localhost:6379", {
+  commandTimeout: 5_000,
+  connectTimeout: 5_000,
+  enableOfflineQueue: false,
+  lazyConnect: true,
+  maxRetriesPerRequest: 1,
+  retryStrategy: (attempt) => Math.min(attempt * 200, 5_000),
+});
+
+await redis.connect();
+await redis.ping();
 
 const transformRateLimit = createRateLimitDirective({
   limiterClass: RateLimiterRedis,
   limiterOptions: {
+    keyPrefix: "my-graphql-api",
+    rejectIfRedisNotReady: true,
     storeClient: redis,
   },
 });
@@ -99,12 +114,23 @@ const schemaWithRateLimit = transformRateLimit(schema);
 
 If you do not pass `keyGenerator`, the built-in default key generator is used.
 
+## Migrating from 3.x
+
+Version 4 introduces the versioned Redis identity protocol `rateLimit:v2`. It isolates distinct directive policies, fingerprints API/composite identities, canonically encodes long values and IP addresses, and gives anonymous variants disjoint tags. These corrections intentionally change stored Redis keys.
+
+- Deploy 3.x and 4.x with a coordinated cutover. A mixed-major fleet uses independent counters and can temporarily admit more requests than one global quota permits.
+- For blue/green deployment, use distinct application `keyPrefix` values and move traffic completely to the 4.x fleet rather than splitting one caller population across both versions.
+- Old keys require no destructive migration; they expire according to their existing limiter TTLs.
+- Forwarded-client selection now counts trusted hops from the right. Configure `trustedProxyHops` for proxy chains longer than one hop.
+
 ## Configuration
+
 ### `createRateLimitDirective(config)`
+
 | Field | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `limiterClass` | Yes | None | Must be a constructor that returns an object with `consume(key): Promise<unknown>`. |
-| `limiterOptions` | Yes | None | Must be an object and include `storeClient` (not `null`/`undefined`). |
+| `limiterOptions` | Yes | None | Must include `storeClient`; set an application-specific `keyPrefix` to isolate deployments. `points` and `duration` are injected from the directive. |
 | `keyGenerator` | No | `createDefaultKeyGenerator(defaultKeyGeneratorOptions)` | Signature: `(directiveArgs, source, args, context, info) => string \| Promise<string>`. |
 | `defaultKeyGeneratorOptions` | No | See below | Used only when `keyGenerator` is not provided. |
 | `runtimeLimits` | No | See below | Validates bounds for directive args and limiter/key internals. |
@@ -129,20 +155,26 @@ If you do not pass `keyGenerator`, the built-in default key generator is used.
 - `includeIP`: `true`
 - `includeApiKey`: `true`
 - `trustProxy`: `false`
+- `trustedProxyHops`: `1` (used only when `trustProxy` is `true`)
 
-`trustProxy: true` requires `includeIP !== false`.
+`trustProxy: true` requires `includeIP !== false`. Supplying `trustedProxyHops` requires `trustProxy: true`.
 
 ### Built-in default key generator behavior
+
 Identity priority order:
 1. User: `context.user.id` or `context.userId`
-2. IP: `context.req.ip` or `context.ip`
-3. API key: `context.apiKey` or header `x-api-key`
-4. Fallback: `anonymousIdentity` (default `"anonymous"`)
+2. IP: a canonical direct Node socket address; with `trustProxy: true`, a validated forwarded address with the direct transport peer as the only fallback
+3. API key: `context.apiKey` or header `x-api-key` (stored as a SHA-256 fingerprint, never verbatim)
+4. Fallback: the tagged `anonymousIdentity` variant (default `"anonymous"`)
 
 Notes:
 - Every key includes field scope suffix: `:<ParentType>.<fieldName>`.
-- `x-forwarded-for` is used only when `trustProxy: true`; first IP is selected.
-- Header reads support both plain objects and `Headers` instances, case-insensitively.
+- The directive adds the versioned `rateLimit:v2:(limit, duration)` namespace before consumption, preventing unequal policies from sharing Redis counters.
+- `x-forwarded-for` is used only when `trustProxy: true`; the client preceding `trustedProxyHops` is selected from the right.
+- Header reads support plain objects, `Headers`, and Fetch-style `context.request.headers`, case-insensitively. Ambiguous multi-valued credential/forwarding headers are rejected.
+- A present but malformed or ambiguous API-key identity fails closed with `RATE_LIMIT_KEY_ERROR`; it never receives an additional anonymous quota bucket.
+- Composite identities use an unambiguous normalized tuple serialization followed by a fixed-length, collision-resistant SHA-256 fingerprint.
+- Identity components must be strings, `null`, or `undefined`; malformed runtime values are rejected without invoking user-defined coercion.
 
 ## Usage
 ### Public exports
@@ -184,6 +216,7 @@ Notes:
 | Limiter backend failure (non-rate-limit error) in `failClosed` mode | `Rate limiting service unavailable` | `RATE_LIMIT_SERVICE_ERROR` | `503` | None |
 
 ### Key generator examples
+
 ```ts
 import {
   createCompositeKeyGenerator,
@@ -191,9 +224,15 @@ import {
   createUserKeyGenerator,
 } from "graphql-rate-limit-redis-esm";
 
-const byUser = createUserKeyGenerator((ctx) => ctx.user?.id);
-const byIp = createIPKeyGenerator((ctx) => ctx.req?.ip);
-const composite = createCompositeKeyGenerator((ctx) => [
+interface AppContext {
+  apiKey?: string;
+  req?: { ip?: string };
+  user?: { id?: string };
+}
+
+const byUser = createUserKeyGenerator<AppContext>((ctx) => ctx.user?.id);
+const byIp = createIPKeyGenerator<AppContext>((ctx) => ctx.req?.ip);
+const composite = createCompositeKeyGenerator<AppContext>((ctx) => [
   ["userId", ctx.user?.id],
   ["apiKey", ctx.apiKey],
 ]);
@@ -213,26 +252,33 @@ Repository-supported env vars:
 No end-user CLI is implemented. Benchmarks are run through package scripts.
 
 ## Scripts
+
 From `package.json`:
 
 | Script | Command |
 | --- | --- |
 | `pnpm run build` | `tsup` |
+| `pnpm run check:consumers` | Strict ESM and CommonJS declaration-consumer compilation |
+| `pnpm run check:examples` | Strict server-example compilation |
+| `pnpm run check:package` | Runtime export verification + package dry run |
 | `pnpm run dev` | TypeScript watch mode |
-| `pnpm run lint` | Biome check + `tsc --noEmit` |
-| `pnpm run lint:fix` | Biome autofix + `tsc --noEmit` |
+| `pnpm run lint` | Biome + library/example type checks + workflow invariants |
+| `pnpm run lint:fix` | Biome autofix + library/example type checks |
 | `pnpm test` | `vitest run` |
 | `pnpm run test:watch` | `vitest` |
 | `pnpm run test:ui` | `vitest --ui` |
 | `pnpm run test:coverage` | `vitest run --coverage` |
 | `pnpm run benchmark` | `tsx src/bench.ts` |
-| `pnpm run prepublishOnly` | Lint + build + test |
+| `pnpm run verify` | Full lint, build, consumer, coverage, and package gate |
+| `pnpm run prepublishOnly` | Full `verify` gate for manual publishes |
 
 ## Architecture
 - `src/index.ts`: public export surface.
 - `src/constants.ts`: `ERROR_CODES` frozen object.
-- `src/directive.ts`: directive SDL, transformer, config validation, limiter instantiation/cache, resolver wrapping.
-- `src/key-generators.ts`: default and factory key generators, key-part normalization, header/context extraction.
+- `src/directive.ts`: directive SDL, transformer, limiter instantiation/cache, and resolver wrapping.
+- `src/directive-validation.ts`: configuration, directive-argument, key, and runtime-limit validation.
+- `src/key-generators.ts`: default and factory key-generator policies.
+- `src/key-generator-internal.ts`: bounded encoding, IP/header normalization, and composite-entry parsing.
 - `src/errors.ts`: GraphQL error factories and retry-after conversion.
 - `src/types.ts`: public TypeScript interfaces and type aliases.
 - `src/bench.ts`: benchmark harness.
@@ -268,14 +314,14 @@ Configure via environment variables: `BENCH_ITERATIONS` (default 5000), `BENCH_W
   - Cause: directive values are non-positive integers or exceed runtime limits.
   - Fix: use valid positive integers and/or adjust `runtimeLimits`.
 - Schema build throws `Limiter cache size exceeded (...)`.
-  - Cause: too many unique `(duration, limit)` combinations across decorated fields.
+  - Cause: too many unique `(limit, duration)` combinations across decorated fields.
   - Fix: reduce unique combinations or increase `runtimeLimits.maxLimiterCacheSize`.
 - Requests fail with `RATE_LIMIT_KEY_ERROR`.
   - Cause: key generator threw, returned empty/whitespace, returned a key with leading/trailing whitespace or control characters, or returned a key longer than `maxKeyLength` (default `512`).
   - Fix: return a trimmed, non-empty printable string key and keep it within length bounds.
 - Requests fail with `RATE_LIMIT_SERVICE_ERROR`.
   - Cause: limiter backend threw a non-rate-limit error (for example Redis unavailable) and mode is `failClosed`.
-  - Fix: restore backend connectivity or set `serviceErrorMode: "failOpen"` if availability-first behavior is acceptable.
+  - Fix: restore backend connectivity or set `serviceErrorMode: "failOpen"` if availability-first behavior is acceptable. Configure bounded Redis retries and disable its offline queue; the mode cannot classify an operation that remains pending forever.
 - `x-forwarded-for` appears ignored.
   - Cause: default key generator does not trust forwarded headers unless `trustProxy: true`.
   - Fix: enable `trustProxy: true` only behind trusted proxies.
@@ -302,13 +348,14 @@ Configure via environment variables: `BENCH_ITERATIONS` (default 5000), `BENCH_W
 | Section / claim | Source files |
 | --- | --- |
 | What the package exports and how consumers import it | `src/index.ts`, `package.json` |
-| Directive signature, transformer behavior, config validation, runtime limit defaults, service error mode | `src/directive.ts`, `src/types.ts` |
-| Default key identity order, proxy behavior, header extraction, key factories | `src/key-generators.ts`, `src/__tests__/key-generators.test.ts` |
+| Directive signature, transformer behavior, and service error mode | `src/directive.ts`, `src/types.ts` |
+| Configuration validation and runtime limits | `src/directive-validation.ts`, `src/types.ts`, `src/__tests__/directive.test.ts` |
+| Default identity order, proxy behavior, header extraction, and key factories | `src/key-generators.ts`, `src/key-generator-internal.ts`, `src/__tests__/key-generators.test.ts` |
 | Error messages/codes/status fields and retry-after calculation | `src/constants.ts`, `src/errors.ts`, `src/__tests__/errors.test.ts`, `src/__tests__/directive.test.ts` |
 | Node/peer requirements and package metadata | `package.json` |
 | Repository scripts and benchmark execution | `package.json`, `src/bench.ts`, `tsconfig.json` |
 | Benchmark/test environment variables | `src/bench.ts`, `src/__tests__/redis.integration.test.ts`, `.github/workflows/ci.yml` |
-| Repository module layout and visualization artifact | `src/index.ts`, `src/constants.ts`, `src/directive.ts`, `src/key-generators.ts`, `src/errors.ts`, `src/types.ts`, `src/bench.ts`, `src/__tests__/`, `examples/visualization/src/` |
+| Repository module layout and visualization artifact | `src/index.ts`, `src/constants.ts`, `src/directive.ts`, `src/directive-validation.ts`, `src/key-generators.ts`, `src/key-generator-internal.ts`, `src/errors.ts`, `src/types.ts`, `src/bench.ts`, `src/__tests__/`, `examples/visualization/src/` |
 
 ## Related Packages
 

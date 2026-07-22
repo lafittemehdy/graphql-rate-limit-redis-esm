@@ -1,3 +1,5 @@
+/** Validates directive configuration, policy bounds, generated keys, and limiter instances. */
+
 import type {
 	RateLimitDirectiveArgs,
 	RateLimitDirectiveConfig,

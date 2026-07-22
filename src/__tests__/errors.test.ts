@@ -1,3 +1,5 @@
+/** Specifies limiter rejection classification and public GraphQL error construction. */
+
 import { describe, expect, it } from "vitest";
 import {
 	createRateLimitedError,
@@ -17,8 +19,27 @@ describe("Error Utilities", () => {
 			expect(isRateLimitRejection({ msBeforeNext: 0 })).toBe(true);
 		});
 
-		it("should return true for negative msBeforeNext", () => {
-			expect(isRateLimitRejection({ msBeforeNext: -100 })).toBe(true);
+		it("should return false for negative msBeforeNext", () => {
+			expect(isRateLimitRejection({ msBeforeNext: -100 })).toBe(false);
+		});
+
+		it("should return false for non-finite msBeforeNext", () => {
+			expect(isRateLimitRejection({ msBeforeNext: Number.POSITIVE_INFINITY })).toBe(false);
+			expect(isRateLimitRejection({ msBeforeNext: Number.NEGATIVE_INFINITY })).toBe(false);
+		});
+
+		it("should preserve Error-based limiter rejections with valid retry metadata", () => {
+			const customLimiterRejection = Object.assign(new Error("rate limited"), {
+				msBeforeNext: 5000,
+			});
+
+			expect(isRateLimitRejection(customLimiterRejection)).toBe(true);
+		});
+
+		it("should return false for arrays carrying msBeforeNext metadata", () => {
+			const malformedRejection = Object.assign([], { msBeforeNext: 5000 });
+
+			expect(isRateLimitRejection(malformedRejection)).toBe(false);
 		});
 
 		it("should return false for null", () => {

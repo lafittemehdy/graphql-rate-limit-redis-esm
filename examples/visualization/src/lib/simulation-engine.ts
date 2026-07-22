@@ -19,14 +19,39 @@ import type {
 
 /** Identity-to-key-prefix map. */
 const KEY_PREFIXES: Record<Identity, string> = {
-  anonymous: "anonymous",
+  anonymous: "anonymous:anonymous",
   ip: "ip:192.168.1.1",
   user: "user:123",
 };
 
 /** Generates the rate-limit key from the current identity selection. */
-export function generateKey(identity: Identity): string {
-  return `${KEY_PREFIXES[identity]}:Query.login`;
+export function generateKey(
+  config: Pick<RateLimitConfig, "duration" | "identity" | "limit">,
+): string {
+  return `rateLimit:v2:${config.limit}:${config.duration}:${KEY_PREFIXES[config.identity]}:Query.login`;
+}
+
+/** Selects the counter/window state denoted by the generated Redis key. */
+export function getOrCreateLimiterState(
+  config: RateLimitConfig,
+  statesByKey: Map<string, LimiterState>,
+  redisDown: boolean,
+): LimiterState {
+  const key = generateKey(config);
+  const existing = statesByKey.get(key);
+  if (existing) {
+    existing.redisDown = redisDown;
+    return existing;
+  }
+
+  const created: LimiterState = {
+    consumed: 0,
+    redisDown,
+    windowEnd: 0,
+    windowStarted: false,
+  };
+  statesByKey.set(key, created);
+  return created;
 }
 
 /**
@@ -34,7 +59,7 @@ export function generateKey(identity: Identity): string {
  * Mutates `limiter` in place (consumed, windowEnd, windowStarted).
  */
 export function simulateRequest(config: RateLimitConfig, limiter: LimiterState): SimulationResult {
-  const key = generateKey(config.identity);
+  const key = generateKey(config);
   const now = Date.now();
 
   /* Check Redis availability first */

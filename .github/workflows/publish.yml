@@ -1,20 +1,33 @@
 name: Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: npm-publish
+  queue: max
 
 jobs:
-  publish:
-    name: Publish to npm
-    runs-on: ubuntu-latest
+  verify:
+    name: Verify immutable release artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      dist_tag: ${{ steps.identity.outputs.dist_tag }}
+      package_name: ${{ steps.identity.outputs.package_name }}
+      package_version: ${{ steps.identity.outputs.package_version }}
+      release_commit: ${{ steps.identity.outputs.release_commit }}
+
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -24,21 +37,74 @@ jobs:
           - 6379:6379
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - name: Checkout immutable tag object
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.x
           package-manager-cache: false
-          registry-url: https://registry.npmjs.org
 
-      - name: Upgrade npm (required for trusted publishing)
-        run: npm install -g npm@latest
+      - name: Install pinned npm release client
+        run: npm install --global --ignore-scripts npm@12.0.1 # zizmor: ignore[adhoc-packages]
+
+      - name: Verify release identity and ancestry
+        id: identity
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          package_version="$(node --print "require('./package.json').version")"
+          package_name="$(node --print "require('./package.json').name")"
+          expected_tag="v${package_version}"
+          event_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          tag_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+
+          if [ "$RELEASE_TAG" != "$expected_tag" ]; then
+            echo "::error::Tag $RELEASE_TAG does not match package version $expected_tag."
+            exit 1
+          fi
+
+          if [ "$package_name" != "graphql-rate-limit-redis-esm" ]; then
+            echo "::error::Release manifest names an unauthorized npm package."
+            exit 1
+          fi
+
+          if [ "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" != "tag" ]; then
+            echo "::error::Release tags must be annotated tags."
+            exit 1
+          fi
+
+          if [ "$event_commit" != "$(git rev-parse HEAD)" ] || [ "$tag_commit" != "$event_commit" ]; then
+            echo "::error::Checkout, event revision, and tag target do not denote one commit."
+            exit 1
+          fi
+
+          git fetch --no-tags origin "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base --is-ancestor HEAD "refs/remotes/origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Release commit is not reachable from the default branch."
+            exit 1
+          fi
+
+          if [[ "$package_version" == *-* ]]; then
+            echo "dist_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "package_name=$package_name"
+            echo "package_version=$package_version"
+            echo "release_commit=$event_commit"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Show tool versions
         run: |
@@ -49,16 +115,407 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Test
-        run: pnpm test
+      - name: Run release-quality verification
+        run: pnpm run verify
         env:
           REDIS_URL: redis://localhost:6379
 
-      - name: Publish with trusted publishing (OIDC)
-        run: npm publish --access public
+      - name: Create checksummed package archive
+        run: |
+          set -euo pipefail
+          artifact_directory="$RUNNER_TEMP/npm-package"
+          mkdir --parents "$artifact_directory"
+          npm pack --ignore-scripts --pack-destination "$artifact_directory"
+          mapfile -t archives < <(find "$artifact_directory" -maxdepth 1 -type f -name '*.tgz' -print)
+
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one package archive."
+            exit 1
+          fi
+
+          archive_name="$(basename "${archives[0]}")"
+          (cd "$artifact_directory" && sha256sum "$archive_name" > SHA256SUMS)
+
+      - name: Upload immutable package archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package-${{ github.sha }}
+          path: ${{ runner.temp }}/npm-package/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    name: Publish verified archive to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: verify
+    permissions:
+      actions: read # Required only to download the verified package artifact from this workflow run.
+      contents: read
+      id-token: write # Required for npm trusted publishing and provenance; no repository code runs here.
+    outputs:
+      npm_latest_tag: ${{ steps.publication.outputs.npm_latest_tag }}
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+
+      - name: Install pinned npm release client
+        run: npm install --global --ignore-scripts npm@12.0.1 # zizmor: ignore[adhoc-packages]
+
+      - name: Download verified package archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package-${{ github.sha }}
+          path: ${{ runner.temp }}/npm-package
+
+      - name: Verify artifact checksum
+        working-directory: ${{ runner.temp }}/npm-package
+        run: sha256sum --check SHA256SUMS
+
+      - name: Publish or authenticate the existing registry artifact
+        id: publication
+        env:
+          EXPECTED_COMMIT: ${{ needs.verify.outputs.release_commit }}
+          GH_TOKEN: ${{ github.token }}
+          NPM_DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+          PACKAGE_NAME: ${{ needs.verify.outputs.package_name }}
+          PACKAGE_VERSION: ${{ needs.verify.outputs.package_version }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        working-directory: ${{ runner.temp }}/npm-package
+        run: |
+          set -euo pipefail
+
+          read_optional_json_string() {
+            local json
+            json="$(cat)"
+            if [ -z "$json" ]; then
+              printf ''
+              return 0
+            fi
+            jq --raw-output '
+              if type == "string" then .
+              elif type == "array" and length == 1 and (.[0] | type) == "string" then .[0]
+              elif type == "array" and length == 0 then ""
+              else error("expected zero or one JSON string")
+              end
+            ' <<<"$json"
+          }
+
+          read_required_json_string() {
+            local json
+            json="$(cat)"
+            [ -n "$json" ] || return 1
+            jq --raw-output '
+              if type == "string" then .
+              elif type == "array" and length == 1 and (.[0] | type) == "string" then .[0]
+              else error("expected exactly one JSON string")
+              end
+            ' <<<"$json"
+          }
+
+          mapfile -t archives < <(find . -maxdepth 1 -type f -name '*.tgz' -print)
+
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one verified package archive."
+            exit 1
+          fi
+
+          archive="${archives[0]}"
+          archive_size="$(stat --format='%s' "$archive")"
+          manifest_entry_count="$(
+            tar --list --gzip --file "$archive" \
+              | awk '$0 == "package/package.json" { count++ } END { print count + 0 }'
+          )"
+
+          if [ "$archive_size" -le 0 ] || [ "$archive_size" -gt 5242880 ]; then
+            echo "::error::Package archive is empty or exceeds the five-megabyte release bound."
+            exit 1
+          fi
+
+          if [ "$manifest_entry_count" -ne 1 ]; then
+            echo "::error::Package archive must contain exactly one canonical package manifest."
+            exit 1
+          fi
+
+          archive_manifest="$(
+            tar --extract --gzip --to-stdout --file "$archive" package/package.json
+          )"
+          archive_name="$(jq --raw-output '.name' <<<"$archive_manifest")"
+          archive_version="$(jq --raw-output '.version' <<<"$archive_manifest")"
+          if [ "$archive_name" != "$PACKAGE_NAME" ] || [ "$archive_version" != "$PACKAGE_VERSION" ]; then
+            echo "::error::Package archive identity differs from the pre-install release identity."
+            exit 1
+          fi
+
+          tag_ref="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}")"
+          if [ "$(jq --raw-output '.object.type' <<<"$tag_ref")" != "tag" ]; then
+            echo "::error::Remote release tag is no longer an annotated tag."
+            exit 1
+          fi
+
+          tag_object_sha="$(jq --raw-output '.object.sha' <<<"$tag_ref")"
+          tag_object="$(gh api "/repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}")"
+          if [ "$(jq --raw-output '.object.type' <<<"$tag_object")" != "commit" ] || \
+            [ "$(jq --raw-output '.object.sha' <<<"$tag_object")" != "$EXPECTED_COMMIT" ]; then
+            echo "::error::Remote release tag no longer targets the verified release commit."
+            exit 1
+          fi
+
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)"
+          registry_integrity=""
+          current_dist_version=""
+
+          dist_tag_query_succeeded=false
+          for attempt in {1..5}; do
+            if dist_tag_json="$(npm view "$PACKAGE_NAME" "dist-tags.${NPM_DIST_TAG}" --json 2>/dev/null)"; then
+              dist_tag_query_succeeded=true
+              break
+            fi
+
+            if [ "$attempt" -lt 5 ]; then
+              sleep 2
+            fi
+          done
+
+          if [ "$dist_tag_query_succeeded" != "true" ]; then
+            echo "::error::Unable to authenticate the current canonical npm tag."
+            exit 1
+          fi
+          current_dist_version="$(
+            read_optional_json_string <<<"$dist_tag_json"
+          )"
+
+          version_query_resolved=false
+          version_query_stderr="$RUNNER_TEMP/npm-view-version.stderr"
+          for attempt in {1..5}; do
+            if registry_json="$(
+              npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" dist.integrity --json \
+                2>"$version_query_stderr"
+            )"; then
+              registry_integrity="$(
+                read_required_json_string <<<"$registry_json"
+              )"
+              version_query_resolved=true
+              break
+            fi
+
+            if {
+              printf '%s\n' "$registry_json"
+              sed -n '1,40p' "$version_query_stderr"
+            } | grep --extended-regexp --quiet '"code"[[:space:]]*:[[:space:]]*"E404"|^npm (error )?code E404$'; then
+              registry_integrity=""
+              version_query_resolved=true
+              break
+            fi
+
+            if [ "$attempt" -lt 5 ]; then
+              sleep 2
+            fi
+          done
+
+          if [ "$version_query_resolved" != "true" ]; then
+            echo "::error::Unable to determine whether npm already contains the release version."
+            exit 1
+          fi
+
+          if [ -n "$registry_integrity" ]; then
+            if [ "$registry_integrity" != "$local_integrity" ]; then
+              echo "::error::npm already contains this version with different package bytes."
+              exit 1
+            fi
+
+            echo "::notice::npm already contains the authenticated package archive."
+          else
+            if [ -n "$current_dist_version" ]; then
+              CANDIDATE_VERSION="$PACKAGE_VERSION" CURRENT_VERSION="$current_dist_version" \
+                node --input-type=module <<'NODE'
+          const semanticVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
+          function parse(version) {
+            const match = semanticVersionPattern.exec(version);
+            if (!match) throw new Error(`Invalid semantic version: ${version}`);
+            return {
+              core: [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])],
+              prerelease: match[4]?.split(".") ?? null,
+            };
+          }
+
+          function compare(leftVersion, rightVersion) {
+            const left = parse(leftVersion);
+            const right = parse(rightVersion);
+            for (let index = 0; index < left.core.length; index++) {
+              if (left.core[index] !== right.core[index]) {
+                return left.core[index] > right.core[index] ? 1 : -1;
+              }
+            }
+
+            if (left.prerelease === null) return right.prerelease === null ? 0 : 1;
+            if (right.prerelease === null) return -1;
+
+            const length = Math.max(left.prerelease.length, right.prerelease.length);
+            for (let index = 0; index < length; index++) {
+              const leftPart = left.prerelease[index];
+              const rightPart = right.prerelease[index];
+              if (leftPart === undefined) return -1;
+              if (rightPart === undefined) return 1;
+              if (leftPart === rightPart) continue;
+
+              const leftNumeric = /^\d+$/.test(leftPart);
+              const rightNumeric = /^\d+$/.test(rightPart);
+              if (leftNumeric && rightNumeric) {
+                return BigInt(leftPart) > BigInt(rightPart) ? 1 : -1;
+              }
+              if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+              return leftPart > rightPart ? 1 : -1;
+            }
+
+            return 0;
+          }
+
+          if (compare(process.env.CANDIDATE_VERSION, process.env.CURRENT_VERSION) <= 0) {
+            throw new Error(
+              `Refusing to move the canonical npm tag backward from ${process.env.CURRENT_VERSION} to ${process.env.CANDIDATE_VERSION}`,
+            );
+          }
+          NODE
+            fi
+
+            npm publish "$archive" \
+              --access public \
+              --ignore-scripts \
+              --provenance \
+              --tag "$NPM_DIST_TAG"
+          fi
+
+          registry_verified=false
+          for attempt in {1..10}; do
+            if registry_json="$(npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" dist.integrity --json 2>/dev/null)"; then
+              registry_integrity="$(read_required_json_string <<<"$registry_json")"
+            else
+              registry_integrity=""
+            fi
+
+            if [ "$registry_integrity" = "$local_integrity" ]; then
+              registry_verified=true
+              break
+            fi
+
+            if [ -n "$registry_integrity" ]; then
+              echo "::error::Published registry integrity differs from the verified archive."
+              exit 1
+            fi
+
+            if [ "$attempt" -lt 10 ]; then
+              sleep 3
+            fi
+          done
+
+          if [ "$registry_verified" != "true" ]; then
+            echo "::error::npm did not expose the verified package integrity in time."
+            exit 1
+          fi
+
+          npm_latest_version="$(
+            npm view "$PACKAGE_NAME" dist-tags.latest --json \
+              | read_required_json_string
+          )"
+          if [ -z "$npm_latest_version" ]; then
+            echo "::error::npm does not expose a canonical latest version after publication."
+            exit 1
+          fi
+
+          echo "npm_latest_tag=v${npm_latest_version}" >> "$GITHUB_OUTPUT"
+
+  create-release:
+    name: Create GitHub release after npm publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [verify, publish]
+    permissions:
+      contents: write # Required only after npm has authenticated the exact archive.
+
+    steps:
+      - name: Create idempotent, correctly classified release
+        env:
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+          EXPECTED_COMMIT: ${{ needs.verify.outputs.release_commit }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          NPM_LATEST_TAG: ${{ needs.publish.outputs.npm_latest_tag }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          verify_remote_tag() {
+            tag_ref="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}")"
+            if [ "$(jq --raw-output '.object.type' <<<"$tag_ref")" != "tag" ]; then
+              echo "::error::Release tag is no longer an annotated tag."
+              exit 1
+            fi
+
+            tag_object_sha="$(jq --raw-output '.object.sha' <<<"$tag_ref")"
+            tag_object="$(gh api "/repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}")"
+            if [ "$(jq --raw-output '.object.type' <<<"$tag_object")" != "commit" ] || \
+              [ "$(jq --raw-output '.object.sha' <<<"$tag_object")" != "$EXPECTED_COMMIT" ]; then
+              echo "::error::Remote release tag no longer targets the verified release commit."
+              exit 1
+            fi
+          }
+
+          verify_remote_tag
+
+          if release_json="$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>/dev/null)"; then
+            expected_prerelease=false
+            if [ "$DIST_TAG" = "next" ]; then
+              expected_prerelease=true
+            fi
+
+            if [ "$(jq --raw-output '.draft' <<<"$release_json")" != "false" ] || \
+              [ "$(jq --raw-output '.prerelease' <<<"$release_json")" != "$expected_prerelease" ]; then
+              echo "::error::Existing GitHub release has inconsistent draft or prerelease state."
+              exit 1
+            fi
+
+            echo "::notice::GitHub release ${RELEASE_TAG} already exists with the expected classification."
+          else
+            release_flags=(--latest=false)
+            if [ "$DIST_TAG" = "next" ]; then
+              release_flags+=(--prerelease)
+            elif [ "$RELEASE_TAG" = "$NPM_LATEST_TAG" ]; then
+              release_flags=(--latest)
+            fi
+
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --generate-notes \
+              "${release_flags[@]}"
+          fi
+
+          verify_remote_tag
+
+          github_latest_tag="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true
+          )"
+          if [ "$github_latest_tag" != "$NPM_LATEST_TAG" ]; then
+            if ! gh release view "$NPM_LATEST_TAG" >/dev/null 2>&1; then
+              echo "::error::npm latest has no corresponding GitHub release to mark as latest."
+              exit 1
+            fi
+
+            gh release edit "$NPM_LATEST_TAG" --latest
+            github_latest_tag="$(
+              gh api "/repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name'
+            )"
+          fi
+
+          if [ "$github_latest_tag" != "$NPM_LATEST_TAG" ]; then
+            echo "::error::GitHub Latest does not match npm's canonical latest version."
+            exit 1
+          fi

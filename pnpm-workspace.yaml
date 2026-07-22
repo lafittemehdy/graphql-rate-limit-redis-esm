@@ -5,8 +5,12 @@ allowBuilds:
   '@apollo/protobufjs': true
   esbuild: true
 overrides:
-  '@protobufjs/utf8': 1.1.1
-  picomatch: 4.0.4
-  postcss: 8.5.14
-  rollup: 4.60.4
-  vite: 7.3.3
+  '@protobufjs/utf8': 1.1.2
+  body-parser: 2.3.0
+  # tsup 8.5.1 still declares ^0.27, whose supported releases are vulnerable on Windows.
+  # The complete build/declaration/package gate verifies this temporary patched-version override.
+  esbuild: 0.28.1
+  picomatch: 4.0.5
+  postcss: 8.5.21
+  rollup: 4.62.2
+  vite: 7.3.6

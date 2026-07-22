@@ -1,3 +1,5 @@
+/** Specifies Redis-backed limiter behavior against a live integration service. */
+
 import Redis from "ioredis";
 import { RateLimiterRedis } from "rate-limiter-flexible";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";

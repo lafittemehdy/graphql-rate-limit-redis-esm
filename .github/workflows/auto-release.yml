@@ -2,78 +2,276 @@ name: Auto Release
 
 on:
   push:
-    branches: [master, main]
+    branches: [master]
     paths:
       - package.json
       - pnpm-lock.yaml
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: read # Required to authenticate the dependency PR associated with a merge commit.
 
 concurrency:
-  group: auto-release
-  cancel-in-progress: false
+  group: default-branch-writer-${{ github.ref_name }}
+  queue: max
 
 jobs:
-  auto-release:
-    name: Auto-release on dependency update
-    runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]' || contains(github.event.head_commit.message, 'build(deps') || contains(github.event.head_commit.message, 'dependabot')
+  provenance:
+    name: Authenticate dependency merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      eligible: ${{ steps.provenance.outputs.eligible }}
 
     steps:
-      - name: Check release token
+      - name: Verify Dependabot merge provenance
+        id: provenance
         env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$RELEASE_TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN is required to push version tags and trigger publishing."
+          set -euo pipefail
+          echo "eligible=false" >> "$GITHUB_OUTPUT"
+
+          associated_prs='[]'
+          for attempt in {1..6}; do
+            associated_prs="$(
+              gh api --paginate "/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+                --slurp | jq 'add // []'
+            )"
+
+            if [ "$(jq 'length' <<<"$associated_prs")" -gt 0 ]; then
+              break
+            fi
+
+            if [ "$attempt" -lt 6 ]; then
+              sleep 2
+            fi
+          done
+
+          eligible_count="$(
+            jq \
+              --arg branch "$DEFAULT_BRANCH" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg sha "$GITHUB_SHA" \
+              '[.[] | select(
+                .user.id == 49699333 and
+                .base.ref == $branch and
+                .head.repo.full_name == $repository and
+                .merged_at != null and
+                .merge_commit_sha == $sha
+              )] | length' \
+              <<<"$associated_prs"
+          )"
+
+          if [ "$(jq 'length' <<<"$associated_prs")" -ne 1 ] || [ "$eligible_count" -ne 1 ]; then
+            echo "::notice::Revision is not one authenticated Dependabot merge; no release is required."
+            exit 0
+          fi
+
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify deterministic patch release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: provenance
+    if: needs.provenance.outputs.eligible == 'true'
+    outputs:
+      manifest_sha: ${{ steps.manifest.outputs.manifest_sha }}
+      version: ${{ steps.manifest.outputs.version }}
+
+    services:
+      redis:
+        image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout triggering revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      # This trusted step fixes the privileged job's inputs before dependency or repository code runs.
+      - name: Prepare deterministic patch manifest
+        id: manifest
+        run: |
+          set -euo pipefail
+          current_version="$(jq --raw-output '.version' package.json)"
+
+          if [[ ! "$current_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Automatic patch releases require a stable canonical semantic version."
             exit 1
           fi
 
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ github.ref_name }}
-          token: ${{ secrets.RELEASE_TOKEN }}
+          next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          CURRENT_VERSION="$current_version" NEXT_VERSION="$next_version" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const source = readFileSync("package.json", "utf8");
+          const pattern = /("version"\s*:\s*")([^"]+)(")/g;
+          const matches = [...source.matchAll(pattern)];
+
+          if (matches.length !== 1 || matches[0]?.[2] !== process.env.CURRENT_VERSION) {
+            throw new Error("package.json must contain exactly one matching version field");
+          }
+
+          const updated = source.replace(
+            pattern,
+            (_match, prefix, _version, suffix) => `${prefix}${process.env.NEXT_VERSION}${suffix}`,
+          );
+          JSON.parse(updated);
+          writeFileSync("package.json", updated);
+          NODE
+
+          manifest_sha="$(sha256sum package.json | awk '{print $1}')"
+          {
+            echo "manifest_sha=$manifest_sha"
+            echo "version=$next_version"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.x
           package-manager-cache: false
 
-      - name: Sync branch
-        run: git pull --ff-only origin "${GITHUB_REF_NAME}"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Configure git
+      - name: Run release-quality verification
+        run: pnpm run verify
+        env:
+          REDIS_URL: redis://localhost:6379
+
+      - name: Verify release diff and manifest identity
+        env:
+          EXPECTED_MANIFEST_SHA: ${{ steps.manifest.outputs.manifest_sha }}
         run: |
+          set -euo pipefail
+          unexpected_tracked="$(git diff --name-only -- . ':(exclude)package.json')"
+          unexpected_untracked="$(git ls-files --others --exclude-standard)"
+          actual_manifest_sha="$(sha256sum package.json | awk '{print $1}')"
+
+          if [ -n "$unexpected_tracked" ] || [ -n "$unexpected_untracked" ]; then
+            echo "::error::Verification changed files outside the version manifest."
+            printf '%s\n' "$unexpected_tracked" "$unexpected_untracked"
+            exit 1
+          fi
+
+          if git diff --quiet -- package.json || [ "$actual_manifest_sha" != "$EXPECTED_MANIFEST_SHA" ]; then
+            echo "::error::Verified manifest does not match the precomputed patch release."
+            exit 1
+          fi
+
+  push:
+    name: Commit and push verified release revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: verify
+
+    steps:
+      - name: Checkout triggering revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Regenerate and authenticate verified manifest
+        env:
+          EXPECTED_MANIFEST_SHA: ${{ needs.verify.outputs.manifest_sha }}
+          EXPECTED_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          current_version="$(jq --raw-output '.version' package.json)"
+
+          if [[ ! "$current_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Automatic patch releases require a stable canonical semantic version."
+            exit 1
+          fi
+
+          next_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          if [ "$next_version" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Verified version output does not match deterministic regeneration."
+            exit 1
+          fi
+
+          CURRENT_VERSION="$current_version" NEXT_VERSION="$next_version" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          const source = readFileSync("package.json", "utf8");
+          const pattern = /("version"\s*:\s*")([^"]+)(")/g;
+          const matches = [...source.matchAll(pattern)];
+
+          if (matches.length !== 1 || matches[0]?.[2] !== process.env.CURRENT_VERSION) {
+            throw new Error("package.json must contain exactly one matching version field");
+          }
+
+          const updated = source.replace(
+            pattern,
+            (_match, prefix, _version, suffix) => `${prefix}${process.env.NEXT_VERSION}${suffix}`,
+          );
+          JSON.parse(updated);
+          writeFileSync("package.json", updated);
+          NODE
+
+          actual_manifest_sha="$(sha256sum package.json | awk '{print $1}')"
+          changed_files="$(git diff --name-only)"
+          untracked_files="$(git ls-files --others --exclude-standard)"
+
+          if [ "$actual_manifest_sha" != "$EXPECTED_MANIFEST_SHA" ]; then
+            echo "::error::Regenerated manifest differs from the verified manifest."
+            exit 1
+          fi
+
+          if [ "$changed_files" != "package.json" ] || [ -n "$untracked_files" ]; then
+            echo "::error::Privileged release preparation changed an unauthorized path."
+            exit 1
+          fi
+
+      - name: Create local release commit and annotated tag
+        env:
+          VERSION_TAG: v${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump patch version
-        id: bump
-        run: |
-          npm version patch --no-git-tag-version
-          pnpm install --lockfile-only
-          VERSION="v$(node -p "require('./package.json').version")"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse --quiet --verify "refs/tags/${VERSION_TAG}" >/dev/null; then
+            echo "::error::Release tag ${VERSION_TAG} already exists."
+            exit 1
+          fi
 
-      - name: Commit and tag version bump
-        run: |
-          git add package.json pnpm-lock.yaml
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.version }}"
-          git tag "${{ steps.bump.outputs.version }}"
-          git push origin "HEAD:${GITHUB_REF_NAME}" "${{ steps.bump.outputs.version }}"
+          git add package.json
+          git commit --no-verify -m "chore: bump version to ${VERSION_TAG}"
+          git tag --annotate "$VERSION_TAG" --message "$VERSION_TAG"
 
-      - name: Create GitHub Release
-        run: |
-          gh release create "${{ steps.bump.outputs.version }}" \
-            --title "${{ steps.bump.outputs.version }}" \
-            --notes "Automated release for dependency updates." \
-            --latest
+      - name: Atomically push release commit and tag
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION_TAG: v${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN is required to push the verified version and tag."
+            exit 1
+          fi
+
+          gh auth setup-git
+          git push --no-verify --atomic \
+            --force-with-lease="refs/heads/${GITHUB_REF_NAME}:${GITHUB_SHA}" \
+            origin \
+            "HEAD:refs/heads/${GITHUB_REF_NAME}" \
+            "refs/tags/${VERSION_TAG}"

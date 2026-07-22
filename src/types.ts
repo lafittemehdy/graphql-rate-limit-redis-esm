@@ -1,3 +1,5 @@
+/** Defines the public contracts shared by the directive, limiter adapters, and key generators. */
+
 import type { GraphQLResolveInfo, GraphQLSchema } from "graphql";
 
 /**
@@ -34,6 +36,13 @@ export interface DefaultKeyGeneratorOptions {
 	 * @default false
 	 */
 	trustProxy?: boolean;
+
+	/**
+	 * Number of trusted proxy hops, counted from the right of x-forwarded-for.
+	 * Requires trustProxy to be enabled.
+	 * @default 1
+	 */
+	trustedProxyHops?: number;
 }
 
 /**
@@ -53,10 +62,10 @@ export type KeyGenerator<TContext = unknown> = (
  */
 export interface RateLimitDirectiveArgs {
 	/** Time window in seconds. */
-	duration: number;
+	readonly duration: number;
 
 	/** Maximum number of requests allowed in the duration window. */
-	limit: number;
+	readonly limit: number;
 }
 
 /**
@@ -101,8 +110,16 @@ export interface RateLimitDirectiveConfig<TContext = unknown> {
 
 /**
  * Constructor interface for a rate limiter implementation.
+ *
+ * The unparameterized form deliberately erases third-party constructor options:
+ * TypeScript cannot existentially quantify each adapter's narrower option type
+ * while retaining a construct signature. Supply `TOptions` for a strict local
+ * adapter contract.
  */
-export type RateLimiterClass = new (options: Record<string, unknown>) => RateLimiterInstance;
+// biome-ignore lint/suspicious/noExplicitAny: The default is the intentional external-adapter boundary.
+export type RateLimiterClass<TOptions extends object = any> = new (
+	options: TOptions,
+) => RateLimiterInstance;
 
 /**
  * Minimal interface required from a limiter instance.

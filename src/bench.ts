@@ -1,3 +1,5 @@
+/** Benchmarks schema transformation and resolver execution across representative key policies. */
+
 import { makeExecutableSchema } from "@graphql-tools/schema";
 import type { ExecutionResult, GraphQLResolveInfo, GraphQLSchema } from "graphql";
 import { execute, parse } from "graphql";

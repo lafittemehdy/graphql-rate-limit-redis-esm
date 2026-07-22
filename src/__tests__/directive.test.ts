@@ -1,3 +1,5 @@
+/** Specifies directive validation, policy isolation, and resolver failure semantics. */
+
 import { makeExecutableSchema } from "@graphql-tools/schema";
 import { GraphQLError } from "graphql";
 import { RateLimiterRedis } from "rate-limiter-flexible";
@@ -9,6 +11,7 @@ import {
 	createCountingMockLimiterClass,
 	createMockLimiterClass,
 	createMockRedisClient,
+	createOptionsCapturingMockLimiterClass,
 	executeTestQuery,
 } from "./helpers.js";
 
@@ -52,30 +55,30 @@ describe("RateLimitDirective", () => {
 				name: "limit exceeding 1 million",
 				rateLimitDirective: "@rateLimit(limit: 1000001, duration: 60)",
 			},
-		])("should reject invalid directive values: $name", ({
-			expectedMessage,
-			rateLimitDirective,
-		}) => {
-			const config: RateLimitDirectiveConfig = {
-				limiterClass: RateLimiterRedis,
-				limiterOptions: { storeClient: mockRedisClient },
-			};
+		])(
+			"should reject invalid directive values: $name",
+			({ expectedMessage, rateLimitDirective }) => {
+				const config: RateLimitDirectiveConfig = {
+					limiterClass: RateLimiterRedis,
+					limiterOptions: { storeClient: mockRedisClient },
+				};
 
-			const typeDefs = `
+				const typeDefs = `
           ${rateLimitDirectiveTypeDefs}
           type Query {
             test: String ${rateLimitDirective}
           }
         `;
 
-			const schema = makeExecutableSchema({
-				resolvers: { Query: { test: () => "success" } },
-				typeDefs,
-			});
+				const schema = makeExecutableSchema({
+					resolvers: { Query: { test: () => "success" } },
+					typeDefs,
+				});
 
-			const rateLimitTransformer = createRateLimitDirective(config);
-			expect(() => rateLimitTransformer(schema)).toThrow(expectedMessage);
-		});
+				const rateLimitTransformer = createRateLimitDirective(config);
+				expect(() => rateLimitTransformer(schema)).toThrow(expectedMessage);
+			},
+		);
 
 		it("should accept valid limit and duration", async () => {
 			consumeSpy.mockResolvedValue(undefined);
@@ -238,12 +241,11 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeUndefined();
 			expect(result.data?.test).toBe("success");
-			expect(consumeSpy).toHaveBeenCalledWith("anonymous:Query.test");
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:anonymous:anonymous:Query.test");
 		});
 
 		it("should reject requests exceeding limit", async () => {
-			const rateLimitError = new Error("Rate limit exceeded");
-			Object.assign(rateLimitError, { msBeforeNext: 5000 });
+			const rateLimitError = { msBeforeNext: 5000 };
 			consumeSpy.mockRejectedValue(rateLimitError);
 
 			const schema = buildRateLimitedSchema({
@@ -263,9 +265,8 @@ describe("RateLimitDirective", () => {
 			expect(result.errors?.[0].extensions?.retryAfter).toBe(5);
 		});
 
-		it("should sanitize invalid retryAfter values", async () => {
-			const rateLimitError = new Error("Rate limit exceeded");
-			Object.assign(rateLimitError, { msBeforeNext: -1000 });
+		it("should clamp zero retryAfter values", async () => {
+			const rateLimitError = { msBeforeNext: 0 };
 			consumeSpy.mockRejectedValue(rateLimitError);
 
 			const schema = buildRateLimitedSchema({
@@ -298,7 +299,33 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeUndefined();
 			expect(customKeyGenerator).toHaveBeenCalled();
-			expect(consumeSpy).toHaveBeenCalledWith("custom:key");
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:custom:key");
+		});
+
+		it("should expose an immutable policy to custom key generators", async () => {
+			consumeSpy.mockResolvedValue(undefined);
+			const customKeyGenerator = vi.fn((directiveArgs: { readonly limit: number }) => {
+				expect(Object.isFrozen(directiveArgs)).toBe(true);
+				try {
+					(directiveArgs as { limit: number }).limit = 999;
+				} catch {
+					// Strict-mode mutation is expected to fail for the frozen policy value.
+				}
+				return "immutable-policy";
+			});
+
+			const schema = buildRateLimitedSchema({
+				config: {
+					keyGenerator: customKeyGenerator,
+					limiterClass: createMockLimiterClass(consumeSpy),
+					limiterOptions: { storeClient: mockRedisClient },
+				},
+			});
+
+			const result = await executeTestQuery(schema);
+
+			expect(result.errors).toBeUndefined();
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:immutable-policy");
 		});
 
 		it("should support async key generator", async () => {
@@ -317,7 +344,7 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeUndefined();
 			expect(asyncKeyGenerator).toHaveBeenCalled();
-			expect(consumeSpy).toHaveBeenCalledWith("async:key");
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:async:key");
 		});
 
 		it("should apply default key generator options from config", async () => {
@@ -339,11 +366,69 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeUndefined();
 			expect(result.data?.test).toBe("success");
-			expect(consumeSpy).toHaveBeenCalledWith("ip:203.0.113.10:Query.test");
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:ip:203.0.113.10:Query.test");
 		});
 	});
 
 	describe("Limiter Instance Sharing", () => {
+		it("should inject directive-owned constructor options", () => {
+			consumeSpy.mockResolvedValue(undefined);
+			const { MockClass, capturedOptions } = createOptionsCapturingMockLimiterClass(consumeSpy);
+
+			buildRateLimitedSchema({
+				config: {
+					limiterClass: MockClass,
+					limiterOptions: {
+						duration: 999,
+						keyPrefix: "application",
+						points: 999,
+						storeClient: mockRedisClient,
+					},
+				},
+				rateLimitDirective: "@rateLimit(limit: 7, duration: 30)",
+			});
+
+			expect(capturedOptions).toEqual([
+				{
+					duration: 30,
+					keyPrefix: "application",
+					points: 7,
+					storeClient: mockRedisClient,
+				},
+			]);
+		});
+
+		it("should namespace equal identity keys by policy", async () => {
+			consumeSpy.mockResolvedValue(undefined);
+
+			const schema = buildRateLimitedSchema({
+				config: {
+					keyGenerator: () => "shared-identity",
+					limiterClass: createMockLimiterClass(consumeSpy),
+					limiterOptions: { storeClient: mockRedisClient },
+				},
+				resolvers: {
+					Query: {
+						one: () => "one",
+						two: () => "two",
+					},
+				},
+				typeDefs: `
+					${rateLimitDirectiveTypeDefs}
+					type Query {
+						one: String @rateLimit(limit: 5, duration: 60)
+						two: String @rateLimit(limit: 10, duration: 60)
+					}
+				`,
+			});
+
+			const result = await executeTestQuery(schema, "{ one two }");
+
+			expect(result.errors).toBeUndefined();
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:5:60:shared-identity");
+			expect(consumeSpy).toHaveBeenCalledWith("rateLimit:v2:10:60:shared-identity");
+		});
+
 		it("should reuse limiter for same configuration", async () => {
 			consumeSpy.mockResolvedValue(undefined);
 			const { MockClass, getCount } = createCountingMockLimiterClass(consumeSpy);
@@ -458,6 +543,29 @@ describe("RateLimitDirective", () => {
 			expect(result.errors?.[0].extensions?.http).toEqual({ status: 503 });
 		});
 
+		it("should not bypass Error-based quota rejections in failOpen mode", async () => {
+			const customLimiterRejection = Object.assign(new Error("rate limited"), {
+				msBeforeNext: 5000,
+			});
+			consumeSpy.mockRejectedValue(customLimiterRejection);
+			const resolver = vi.fn(() => "success");
+
+			const schema = buildRateLimitedSchema({
+				config: {
+					limiterClass: createMockLimiterClass(consumeSpy),
+					limiterOptions: { storeClient: mockRedisClient },
+					serviceErrorMode: "failOpen",
+				},
+				resolvers: { Query: { test: resolver } },
+			});
+
+			const result = await executeTestQuery(schema);
+
+			expect(result.errors?.[0].extensions?.code).toBe("RATE_LIMITED");
+			expect(result.errors?.[0].extensions?.http).toEqual({ status: 429 });
+			expect(resolver).not.toHaveBeenCalled();
+		});
+
 		it("should allow resolver execution on service failure in failOpen mode", async () => {
 			consumeSpy.mockRejectedValue(new Error("ECONNREFUSED"));
 
@@ -515,6 +623,30 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeDefined();
 			expect(result.errors?.[0].message).toBe("Rate limiting key generation failed");
+			expect(result.errors?.[0].extensions?.code).toBe("RATE_LIMIT_KEY_ERROR");
+			expect(result.errors?.[0].extensions?.http).toEqual({ status: 500 });
+			expect(consumeSpy).not.toHaveBeenCalled();
+		});
+
+		it("should fail closed for ambiguous API key credentials", async () => {
+			consumeSpy.mockResolvedValue(undefined);
+
+			const schema = buildRateLimitedSchema({
+				config: {
+					defaultKeyGeneratorOptions: {
+						includeApiKey: true,
+						includeIP: false,
+						includeUserId: false,
+					},
+					limiterClass: createMockLimiterClass(consumeSpy),
+					limiterOptions: { storeClient: mockRedisClient },
+				},
+			});
+
+			const result = await executeTestQuery(schema, "{ test }", {
+				headers: { "x-api-key": ["valid-key", "attacker-controlled"] },
+			});
+
 			expect(result.errors?.[0].extensions?.code).toBe("RATE_LIMIT_KEY_ERROR");
 			expect(result.errors?.[0].extensions?.http).toEqual({ status: 500 });
 			expect(consumeSpy).not.toHaveBeenCalled();
@@ -635,7 +767,7 @@ describe("RateLimitDirective", () => {
 
 			expect(result.errors).toBeUndefined();
 			expect(result.data?.test).toBe("success");
-			expect(consumeSpy).toHaveBeenCalledWith(exactKey);
+			expect(consumeSpy).toHaveBeenCalledWith(`rateLimit:v2:5:60:${exactKey}`);
 		});
 	});
 

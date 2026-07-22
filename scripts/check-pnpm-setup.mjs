@@ -1,3 +1,5 @@
+/** Enforces immutable workflow dependencies and a single canonical pnpm version source. */
+
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +19,8 @@ if (!existsSync(workflowsDir)) {
 	process.exit(0);
 }
 
-const violations = [];
+const immutableReferenceViolations = [];
+const pnpmVersionViolations = [];
 
 for (const fileName of readdirSync(workflowsDir)) {
 	if (!fileName.endsWith(".yml") && !fileName.endsWith(".yaml")) {
@@ -29,6 +32,20 @@ for (const fileName of readdirSync(workflowsDir)) {
 
 	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
 		const line = lines[lineIndex];
+		const usesMatch = line?.match(/^\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/);
+		if (usesMatch) {
+			const actionReference = usesMatch[1];
+			if (!actionReference.startsWith("./") && !actionReference.startsWith("docker://")) {
+				const separatorIndex = actionReference.lastIndexOf("@");
+				const revision =
+					separatorIndex === -1 ? "" : actionReference.slice(separatorIndex + 1).toLowerCase();
+
+				if (!/^[0-9a-f]{40}$/.test(revision)) {
+					immutableReferenceViolations.push(`${fileName}:${lineIndex + 1}`);
+				}
+			}
+		}
+
 		if (!line?.includes("pnpm/action-setup")) {
 			continue;
 		}
@@ -52,19 +69,30 @@ for (const fileName of readdirSync(workflowsDir)) {
 			}
 
 			if (/^\s*version\s*:/.test(candidate)) {
-				violations.push(`${fileName}:${cursor + 1}`);
+				pnpmVersionViolations.push(`${fileName}:${cursor + 1}`);
 			}
 		}
 	}
 }
 
-if (violations.length > 0) {
-	console.error(
-		[
+if (immutableReferenceViolations.length > 0 || pnpmVersionViolations.length > 0) {
+	const diagnostics = [];
+
+	if (immutableReferenceViolations.length > 0) {
+		diagnostics.push(
+			"External GitHub Actions must be pinned to immutable 40-character commit SHAs.",
+			...immutableReferenceViolations.map((location) => `- ${location}`),
+		);
+	}
+
+	if (pnpmVersionViolations.length > 0) {
+		diagnostics.push(
 			"Found pnpm/action-setup version fields while packageManager is set in package.json.",
 			"Remove the workflow `with.version` entries to avoid pnpm version conflicts.",
-			...violations.map((location) => `- ${location}`),
-		].join("\n"),
-	);
+			...pnpmVersionViolations.map((location) => `- ${location}`),
+		);
+	}
+
+	console.error(diagnostics.join("\n"));
 	process.exit(1);
 }

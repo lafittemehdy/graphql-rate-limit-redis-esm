@@ -1,3 +1,5 @@
+/** Applies validated rate-limit policies to GraphQL field resolvers. */
+
 import { getDirective, MapperKind, mapSchema } from "@graphql-tools/utils";
 import type { GraphQLFieldConfig, GraphQLResolveInfo, GraphQLSchema } from "graphql";
 import { defaultFieldResolver } from "graphql";
@@ -26,6 +28,7 @@ import type {
 } from "./types.js";
 
 const DIRECTIVE_NAME = "rateLimit";
+const POLICY_KEY_NAMESPACE = "rateLimit:v2";
 
 type Resolver<TContext> = NonNullable<GraphQLFieldConfig<unknown, TContext>["resolve"]>;
 
@@ -44,6 +47,11 @@ function createRateLimitedResolver<TContext>(
 	},
 ): Resolver<TContext> {
 	const { args, keyGenerator, limiter, maxKeyLength, serviceErrorMode } = options;
+	const policyArgs: RateLimitDirectiveArgs = Object.freeze({
+		duration: args.duration,
+		limit: args.limit,
+	});
+	const policyKeyPrefix = `${POLICY_KEY_NAMESPACE}:${policyArgs.limit}:${policyArgs.duration}:`;
 
 	return async (
 		source: unknown,
@@ -55,7 +63,7 @@ function createRateLimitedResolver<TContext>(
 
 		let key: string;
 		try {
-			key = await keyGenerator(args, source, resolverArgs, context, info);
+			key = await keyGenerator(policyArgs, source, resolverArgs, context, info);
 		} catch {
 			throw createRateLimitKeyError();
 		}
@@ -65,7 +73,7 @@ function createRateLimitedResolver<TContext>(
 		}
 
 		try {
-			await limiter.consume(key);
+			await limiter.consume(`${policyKeyPrefix}${key}`);
 		} catch (error: unknown) {
 			if (isRateLimitRejection(error)) {
 				throw createRateLimitedError(error.msBeforeNext);
@@ -134,7 +142,7 @@ export function createRateLimitDirective<TContext = unknown>(
 				const args = parseDirectiveArgs(directive);
 				validateDirectiveArgs(args, runtimeLimits);
 
-				const limiterKey = `${args.duration}:${args.limit}`;
+				const limiterKey = `${args.limit}:${args.duration}`;
 				let limiter = limitersByConfig.get(limiterKey);
 				if (!limiter) {
 					if (limitersByConfig.size >= runtimeLimits.maxLimiterCacheSize) {
@@ -143,11 +151,12 @@ export function createRateLimitDirective<TContext = unknown>(
 						);
 					}
 
-					const createdLimiter = new limiterClass({
+					const constructorOptions = {
 						...limiterOptions,
 						duration: args.duration,
 						points: args.limit,
-					});
+					};
+					const createdLimiter = new limiterClass(constructorOptions);
 					assertLimiterInstance(createdLimiter, args);
 					limiter = createdLimiter;
 					limitersByConfig.set(limiterKey, limiter);
