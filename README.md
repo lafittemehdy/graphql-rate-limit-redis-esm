@@ -6,7 +6,7 @@
 [![npm version](https://img.shields.io/npm/v/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 [![npm downloads](https://img.shields.io/npm/dm/graphql-rate-limit-redis-esm?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node >=22.13](https://img.shields.io/badge/node-%3E%3D22.13-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node >=22.18](https://img.shields.io/badge/node-%3E%3D22.18-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Provenance](https://img.shields.io/badge/provenance-verified-brightgreen?logo=npm)](https://www.npmjs.com/package/graphql-rate-limit-redis-esm)
 
 Production-ready GraphQL rate limiting directive for Redis with ESM support.
@@ -43,10 +43,10 @@ At runtime, each decorated field calls a limiter instance (`consume(key)`) befor
 
 ### Requirements
 
-- Node.js `>=22.13.0` (from `engines`).
+- Node.js `>=22.18.0` (from `engines`).
 - Peer dependencies:
   - `graphql` `^16.0.0 || ^17.0.0`
-  - `@graphql-tools/utils` `^10.0.0 || ^11.0.0`
+  - `@graphql-tools/utils` `^10.0.0 || ^11.0.0 || ^12.0.0 || ^13.0.0`
   - `rate-limiter-flexible` `^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0`
 
 If you use `RateLimiterRedis`, you also need a Redis client (for example `ioredis`) and a reachable Redis server.
@@ -327,7 +327,7 @@ Configure via environment variables: `BENCH_ITERATIONS` (default 5000), `BENCH_W
   - Fix: enable `trustProxy: true` only behind trusted proxies.
 
 ## Contributing / Development notes
-- Minimum Node version is `22.13`.
+- Minimum Node version is `22.18`.
 - Typical local workflow:
   - `pnpm install`
   - `pnpm run lint`

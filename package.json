@@ -4,7 +4,7 @@
 	"description": "Production-ready GraphQL rate limiting directive for Redis with ESM support",
 	"author": "Lafitte Mehdy (https://github.com/lafittemehdy)",
 	"license": "MIT",
-	"packageManager": "pnpm@11.15.1",
+	"packageManager": "pnpm@12.14.0",
 	"type": "module",
 	"exports": {
 		".": {
@@ -28,7 +28,7 @@
 		"README.md"
 	],
 	"engines": {
-		"node": ">=22.13.0"
+		"node": ">=22.18.0"
 	},
 	"keywords": [
 		"directive",
@@ -54,27 +54,27 @@
 		"provenance": true
 	},
 	"peerDependencies": {
-		"@graphql-tools/utils": "^10.0.0 || ^11.0.0",
+		"@graphql-tools/utils": "^10.0.0 || ^11.0.0 || ^12.0.0 || ^13.0.0",
 		"graphql": "^16.0.0 || ^17.0.0",
 		"rate-limiter-flexible": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0"
 	},
 	"devDependencies": {
 		"@apollo/server": "^5.5.1",
-		"@biomejs/biome": "^2.5.9",
-		"@graphql-tools/schema": "^10.1.0",
-		"@graphql-tools/utils": "^11.2.2",
-		"@types/node": "^22.20.1",
-		"@vitest/coverage-v8": "^4.1.10",
-		"@vitest/ui": "^4.1.10",
+		"@biomejs/biome": "^2.5.15",
+		"@graphql-tools/schema": "^11.0.2",
+		"@graphql-tools/utils": "^13.0.2",
+		"@types/node": "^26.6.5",
+		"@vitest/coverage-v8": "^5.0.5",
+		"@vitest/ui": "^5.0.5",
 		"graphql": "^16.14.2",
-		"graphql-yoga": "^5.21.3",
+		"graphql-yoga": "^5.24.6",
 		"husky": "^9.1.7",
-		"ioredis": "^5.11.1",
-		"rate-limiter-flexible": "^11.2.0",
-		"tsup": "^8.5.1",
-		"tsx": "^4.23.12",
+		"ioredis": "^6.0.0",
+		"rate-limiter-flexible": "^11.2.3",
+		"tsup": "^9.0.0",
+		"tsx": "^4.23.15",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.10"
+		"vitest": "^5.0.5"
 	},
 	"scripts": {
 		"benchmark": "tsx src/bench.ts",

@@ -4,13 +4,14 @@ minimumReleaseAge: 1440
 allowBuilds:
   '@apollo/protobufjs': true
   esbuild: true
+minimumReleaseAgeExclude:
+  - "@graphql-tools/merge@10.0.2"
+  - "@graphql-tools/schema@11.0.2"
+  - "@graphql-tools/utils@13.0.2"
 overrides:
-  '@protobufjs/utf8': 1.1.2
-  body-parser: 2.3.0
-  # tsup 8.5.1 still declares ^0.27, whose supported releases are vulnerable on Windows.
-  # The complete build/declaration/package gate verifies this temporary patched-version override.
-  esbuild: 0.28.1
-  picomatch: 4.0.5
-  postcss: 8.5.21
-  rollup: 4.62.2
-  vite: 7.3.6
+  "@graphql-tools/utils": "13.0.2"
+  "@fastify/busboy": "3.2.3"
+  "qs": "6.16.1"
+  "source-map-js": "1.2.2"
+  "body-parser": "2.3.0"
+  "esbuild": "0.28.2"
