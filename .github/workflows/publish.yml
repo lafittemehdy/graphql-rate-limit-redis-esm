@@ -184,6 +184,7 @@ jobs:
           EXPECTED_COMMIT: ${{ needs.verify.outputs.release_commit }}
           GH_TOKEN: ${{ github.token }}
           NPM_DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
+          NPM_CONFIG_PREFER_ONLINE: "true"
           PACKAGE_NAME: ${{ needs.verify.outputs.package_name }}
           PACKAGE_VERSION: ${{ needs.verify.outputs.package_version }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -394,7 +395,8 @@ jobs:
           fi
 
           registry_verified=false
-          for attempt in {1..10}; do
+          # npm can process a successful publication for several minutes.
+          for attempt in {1..60}; do
             if registry_json="$(npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" dist.integrity --json 2>/dev/null)"; then
               registry_integrity="$(read_required_json_string <<<"$registry_json")"
             else
@@ -411,8 +413,8 @@ jobs:
               exit 1
             fi
 
-            if [ "$attempt" -lt 10 ]; then
-              sleep 3
+            if [ "$attempt" -lt 60 ]; then
+              sleep 5
             fi
           done
 
