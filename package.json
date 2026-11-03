@@ -60,9 +60,9 @@
 	},
 	"devDependencies": {
 		"@apollo/server": "^5.5.1",
-		"@biomejs/biome": "^2.5.15",
-		"@graphql-tools/schema": "^11.0.2",
-		"@graphql-tools/utils": "^13.0.2",
+		"@biomejs/biome": "^2.6.3",
+		"@graphql-tools/schema": "^11.0.7",
+		"@graphql-tools/utils": "^13.2.0",
 		"@types/node": "^26.6.5",
 		"@vitest/coverage-v8": "^5.0.5",
 		"@vitest/ui": "^5.0.5",
