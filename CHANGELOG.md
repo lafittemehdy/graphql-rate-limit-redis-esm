@@ -1,0 +1,9 @@
+# Changelog
+
+## 5.0.1 - 2026-11-14
+
+- Keep welcome-dialog background controls inert and tolerate unavailable clipboard access in the example, with browser regressions.
+
+- Update dependencies and example applications to current compatible stable releases.
+- Include contribution guidelines, the Contributor Covenant, and a private security reporting policy in the repository and npm package.
+- Patch affected transitive development dependencies and verify production and development dependency audits.

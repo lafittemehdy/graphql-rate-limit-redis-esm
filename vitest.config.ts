@@ -7,6 +7,7 @@ export default defineConfig({
 		dedupe: ["graphql", "@graphql-tools/schema", "@graphql-tools/utils"],
 	},
 	test: {
+		include: ["src/**/*.test.ts"],
 		coverage: {
 			exclude: ["dist/**", "examples/**", "src/__tests__/**", "tsup.config.ts", "vitest.config.ts"],
 			provider: "v8",

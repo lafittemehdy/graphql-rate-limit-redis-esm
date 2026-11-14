@@ -88,6 +88,14 @@ jobs:
         working-directory: examples/visualization
         run: npm audit --audit-level=high
 
+      - name: Install Chromium for example accessibility checks
+        working-directory: examples/visualization
+        run: npx playwright install --with-deps chromium
+
+      - name: Test example keyboard and responsive behavior
+        working-directory: examples/visualization
+        run: npm run test:browser
+
   test:
     name: Test on Node.js ${{ matrix.node-version }}
     runs-on: ubuntu-24.04
