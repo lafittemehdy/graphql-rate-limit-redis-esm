@@ -64,7 +64,7 @@
 	},
 	"devDependencies": {
 		"@apollo/server": "^5.5.2",
-		"@biomejs/biome": "^2.6.7",
+		"@biomejs/biome": "^2.6.8",
 		"@graphql-tools/schema": "^11.0.9",
 		"@graphql-tools/utils": "^13.2.2",
 		"@types/node": "^26.6.6",
@@ -74,7 +74,7 @@
 		"graphql-yoga": "^6.1.0",
 		"husky": "^9.1.7",
 		"ioredis": "^6.0.0",
-		"rate-limiter-flexible": "^11.4.1",
+		"rate-limiter-flexible": "^11.5.0",
 		"tsup": "^9.0.0",
 		"tsx": "^4.23.15",
 		"typescript": "^6.0.3",
